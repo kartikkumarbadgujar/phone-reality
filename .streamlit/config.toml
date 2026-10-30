@@ -1,0 +1,14 @@
+# Streamlit settings for PhoneReality (used both on your laptop and on Streamlit Cloud)
+[server]
+# headless = true: Streamlit prints the address instead of asking for an e-mail on first run.
+# Open http://localhost:8501 in your browser (Ctrl+click the link in the terminal).
+headless = true
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+
+[theme]
+primaryColor = "#2563eb"

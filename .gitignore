@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.pytest_cache/
+data/server_files/
+data/server_uploads.json
+data/results.corrupt-*.json
+# Your own local test results stay on your laptop (the app creates an empty file when missing)
+data/results.json
+data/assumptions.json
+# Private judge preparation - kept on this laptop only
+PRESENTATION_NOTES.md
