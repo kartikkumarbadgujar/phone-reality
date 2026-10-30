@@ -150,7 +150,7 @@ python -m pytest
 ```
 
 This starts its own copy of the demo app on a free port, so you do **not** need `demo_app.py` running.
-It never touches your real `data/results.json`. Expected result: `62 passed`.
+It never touches your real `data/results.json`. Expected result: `63 passed`.
 
 ---
 
@@ -217,7 +217,7 @@ the run SIMULATED; any delay or injected failure makes it FAULT_INJECTION; other
 | `storage.py` | Reads/writes `data/results.json` and `data/assumptions.json`. Copes with missing, empty and broken files. |
 | `report_generator.py` | JSON, CSV and Markdown exports. |
 | `app.py` | The Streamlit dashboard (screens only — no testing logic). |
-| `tests/` | 62 automated tests: unit tests plus end-to-end tests against a real demo app and the real dashboard. |
+| `tests/` | 63 automated tests: unit tests plus end-to-end tests against a real demo app and the real dashboard. |
 | `start.bat` | One-click start. |
 | `.streamlit/config.toml` | Dashboard settings (no e-mail prompt, no usage statistics, colours). Used locally and online. |
 
