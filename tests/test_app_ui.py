@@ -29,7 +29,7 @@ def test_every_page_works_with_no_results(page):  # T12
 def test_empty_dashboard_says_so():
     at = open_page("Dashboard")
     assert any("No tests have been run yet" in i.value for i in at.info)
-    assert len(at.metric) == 0
+    assert [metric.value for metric in at.metric] == ["0", "0", "0", "0", "0"]
 
 
 def test_sidebar_reports_server_down():
@@ -58,7 +58,7 @@ def test_run_button_executes_real_test_and_fills_pages(demo_server):
         at.run()
         assert not at.exception, (page, at.exception)
     dashboard = open_page("Dashboard", demo_server)
-    assert dashboard.metric[0].value == "1"
+    assert next(metric.value for metric in dashboard.metric if metric.label == "Test sessions") == "1"
 
 
 def test_online_mode_runs_builtin_demo_app_with_locked_address(monkeypatch):

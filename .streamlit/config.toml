@@ -1,4 +1,4 @@
-# Streamlit settings for PhoneReality (used both on your laptop and on Streamlit Cloud)
+# Streamlit settings for BudgetBench (used locally and on Community Cloud)
 [server]
 # headless = true: Streamlit prints the address instead of asking for an e-mail on first run.
 # Open http://localhost:8501 in your browser (Ctrl+click the link in the terminal).
@@ -11,4 +11,4 @@ gatherUsageStats = false
 toolbarMode = "minimal"
 
 [theme]
-primaryColor = "#2563eb"
+primaryColor = "#8b5cf6"
