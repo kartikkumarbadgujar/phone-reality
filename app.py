@@ -32,7 +32,7 @@ from database import db_manager
 
 st.set_page_config(page_title="BudgetBench", page_icon="📱", layout="wide", initial_sidebar_state="expanded")
 
-PAGES = ["Dashboard", "Overview Dashboard", "Projects", "Device Lab", "Test Environment", "Run Tests",
+PAGES = ["Dashboard", "Projects", "Device Lab", "Test Environment", "Run Tests",
          "Live Monitoring", "Condition Matrix", "Failure Analysis", "Findings", "Reproduce",
          "Test History", "Reports", "Neo4j Graph Explorer", "Challenge Readiness Centre", "Settings"]
 
@@ -62,6 +62,24 @@ BAND_BADGES = {"High": ":red-badge[High priority]", "Medium": ":orange-badge[Med
 # Chart colours for operation statuses (status palette: good / warning / critical / neutral)
 STATUS_COLORS = {"SUCCESS": "#0ca30c", "TIMEOUT": "#fab219", "HTTP_ERROR": "#d03b3b",
                  "LOST_SIMULATED": "#8a8a8a"}
+
+NAV_LABELS = {
+    "Dashboard": "◈   Overview",
+    "Projects": "▦   Projects",
+    "Device Lab": "◉   Device lab",
+    "Test Environment": "⚙   Test setup",
+    "Run Tests": "▶   Run tests",
+    "Live Monitoring": "⌁   Live monitor",
+    "Condition Matrix": "⊞   Condition matrix",
+    "Failure Analysis": "⌕   Failure analysis",
+    "Findings": "⚑   Findings",
+    "Reproduce": "↻   Reproduce",
+    "Test History": "◷   Test history",
+    "Reports": "▤   Reports",
+    "Neo4j Graph Explorer": "⋈   Graph explorer",
+    "Challenge Readiness Centre": "◎   Challenge centre",
+    "Settings": "⚙   Settings",
+}
 
 
 # ONLINE MODE. Streamlit Community Cloud runs only this one program, so there is no second terminal
@@ -98,6 +116,15 @@ def go_to_reproduce(finding_id):
     """Button callback: jump to the Reproduce page with this finding selected."""
     st.session_state["page"] = "Reproduce"
     st.session_state["repro_finding"] = finding_id
+
+
+def page_header(title, description, eyebrow="BUDGETBENCH"):
+    """Give each workspace page the same clear title and short orientation."""
+    st.markdown(
+        f'<div class="bb-page-head"><div class="bb-kicker">{eyebrow}</div>'
+        f'<h1>{title}</h1><p class="bb-subtitle">{description}</p></div>',
+        unsafe_allow_html=True,
+    )
 
 
 # ---------------------------------------------------------------- shared pieces
@@ -175,10 +202,21 @@ def show_finding(finding):
 # ---------------------------------------------------------------- pages
 
 def page_dashboard(records, findings):
-    st.markdown('<div class="bb-kicker">HackFront India · PS T1.2</div>', unsafe_allow_html=True)
-    st.title("BudgetBench")
-    st.markdown('<p class="bb-subtitle">Test Beyond the Flagship. Build for Every Phone. Discover how software behaves when devices and connections are constrained.</p>', unsafe_allow_html=True)
-    st.header("Overview")
+    st.markdown(
+        '<section class="bb-hero"><div class="bb-hero-content">'
+        '<div class="bb-hero-label">HackFront India · PS T1.2</div>'
+        '<div class="bb-hero-title">Test beyond the flagship.</div>'
+        '<p class="bb-hero-copy">Find reliability issues under slower responses and intermittent service. '
+        'Capture evidence, understand impact, and reproduce the behavior.</p>'
+        '</div></section>', unsafe_allow_html=True)
+    action_left, action_right = st.columns([1, 1])
+    if action_left.button("▶   Start a test", type="primary", use_container_width=True, key="dashboard_start_test"):
+        st.session_state["page"] = "Run Tests"
+        st.rerun()
+    if action_right.button("＋   Create a project", use_container_width=True, key="dashboard_create_project"):
+        st.session_state["page"] = "Projects"
+        st.rerun()
+    st.markdown('<div class="bb-section-heading"><h3>Workspace at a glance</h3></div>', unsafe_allow_html=True)
     db_counts = db_manager.counts()
     request_attempts = sum(len(record.get("attempts", [])) for record in records)
     open_findings = sum(f.get("status", "Open") != "Resolved" for f in findings)
@@ -189,11 +227,12 @@ def page_dashboard(records, findings):
     summary[3].metric("Device snapshots", db_counts["device_snapshots"])
     summary[4].metric("Open findings", open_findings)
     if not records:
-        st.info("No tests have been run yet, so there is nothing to show. "
-                "Nothing on this page is sample data — it only ever shows real runs.")
-        st.markdown("1. Start the demo app in a terminal: `python demo_app.py`\n"
-                    "2. Open **Run Tests**, choose *Upload a file* + *Slow Network*, click **Run test**.\n"
-                    "3. Come back here, or open **Findings**.")
+        st.markdown(
+            '<div class="bb-empty"><div class="bb-empty-title">Your reliability workspace is ready</div>'
+            '<div class="bb-empty-copy">There are no test runs yet. Start with the built-in upload scenario '
+            'to see how delayed responses can create ambiguous uploads and how idempotency prevents duplicates.</div></div>',
+            unsafe_allow_html=True)
+        st.caption("Metrics fill in from saved projects, test runs, findings, and device snapshots. No sample results are shown.")
         return
 
     total = len(records)
@@ -217,7 +256,7 @@ def page_dashboard(records, findings):
     c2.metric("Controlled fault injections", by_category["FAULT_INJECTION"])
     c3.metric("SIMULATED", by_category["SIMULATED"])
 
-    st.subheader("Operation outcome by profile")
+    st.markdown('<div class="bb-section-heading"><h3>Outcomes by condition</h3></div>', unsafe_allow_html=True)
     table = pd.DataFrame([{"Profile": tester.PROFILES[r["profile"]]["short"], "Status": r["operation_status"]}
                           for r in records])
     counts = table.groupby(["Profile", "Status"]).size().unstack(fill_value=0)
@@ -226,7 +265,7 @@ def page_dashboard(records, findings):
     st.bar_chart(counts[statuses], color=[STATUS_COLORS[s] for s in statuses], horizontal=True,
                  x_label="", y_label="Number of tests", height=90 + 45 * len(counts))
 
-    st.subheader("Recent activity")
+    st.markdown('<div class="bb-section-heading"><h3>Recent activity</h3></div>', unsafe_allow_html=True)
     recent = pd.DataFrame([{
         "Time": r["timestamp"][11:], "Test ID": r["test_id"], "Profile": r["profile_label"],
         "Operation": r["operation"], "Evidence": r["evidence_category"], "Expected": r["expected_status"],
@@ -237,7 +276,7 @@ def page_dashboard(records, findings):
 
 
 def page_condition_matrix(records):
-    st.header("Condition Matrix")
+    page_header("Condition matrix", "Compare each runnable profile, the evidence it produces, and what remains outside this build.", "TEST DESIGN")
     st.caption("What each condition profile does, how trustworthy its evidence is, and the latest real result. "
                "The evidence category of a run is decided from the settings actually used, not the profile name.")
 
@@ -279,7 +318,8 @@ def page_condition_matrix(records):
 
 
 def page_run_tests(base_url):
-    st.header("Run Tests")
+    page_header("Run a test", "Choose an operation and condition, review the expected outcome, then run the real HTTP scenario.", "TEST LAB")
+    st.markdown('<div class="bb-section-heading"><h3>1. Choose the scenario</h3></div>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     operation = c1.selectbox("Operation", list(tester.OPERATIONS),
                              format_func=lambda k: tester.OPERATIONS[k]["label"])
@@ -288,12 +328,14 @@ def page_run_tests(base_url):
                            index=list(tester.PROFILES).index(requested_profile) if requested_profile in tester.PROFILES else 0,
                            format_func=lambda k: tester.PROFILES[k]["label"])
     info = tester.PROFILES[profile]
-    st.markdown(f"{badge(CATEGORY_BADGES, info['evidence_category'])} {info['description']}")
+    with st.container(border=True):
+        st.markdown(f"{badge(CATEGORY_BADGES, info['evidence_category'])} {info['description']}")
 
     defaults = tester.build_config(operation, profile, base_url)
     key = f"{operation}_{profile}"  # new widget keys per combination, so defaults reload when you switch
     is_upload = operation == "upload"
 
+    st.markdown('<div class="bb-section-heading"><h3>2. Tune the conditions</h3></div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     timeout = c1.number_input("Client timeout (s)", 0.2, 60.0, float(defaults["timeout"]), 0.1,
                               key=f"timeout_{key}", help="How long the client waits for a reply before giving up.")
@@ -327,13 +369,16 @@ def page_run_tests(base_url):
         return
 
     predicted, reason = tester.predict_status(config)
-    st.markdown(f"Evidence category for these settings: {badge(CATEGORY_BADGES, tester.evidence_category(config))}"
-                f" · Predicted operation status: {badge(STATUS_BADGES, predicted)}")
-    st.caption(f"Prediction: {reason}")
+    st.markdown('<div class="bb-section-heading"><h3>3. Review before running</h3></div>', unsafe_allow_html=True)
+    with st.container(border=True):
+        prediction_left, prediction_right = st.columns([1, 2])
+        prediction_left.markdown(f"**Expected outcome**  \n{badge(STATUS_BADGES, predicted)}")
+        prediction_right.markdown(f"**Evidence type**  \n{badge(CATEGORY_BADGES, tester.evidence_category(config))}")
+        st.caption(reason)
     if predicted == "UNPREDICTABLE":
         st.warning(reason)
 
-    if st.button("Run test", type="primary"):
+    if st.button("Run test", type="primary", use_container_width=True):
         ok, message = tester.check_server(base_url)
         if not ok:
             st.error(message)
@@ -353,7 +398,7 @@ def page_run_tests(base_url):
 
 
 def page_findings(findings, assumptions):
-    st.header("Findings")
+    page_header("Findings", "Review detector-backed issues, evidence, and transparent priority scores.", "INVESTIGATE")
     with st.expander("Scoring assumptions (editable) — these are NOT measurements"):
         st.caption(scoring.ASSUMPTION_SOURCE)
         with st.form("assumptions"):
@@ -399,7 +444,7 @@ def page_findings(findings, assumptions):
 
 
 def page_reproduce(findings):
-    st.header("Reproduce")
+    page_header("Reproduce a finding", "Rerun the original configuration to check whether the same detector fires again.", "INVESTIGATE")
     if not findings:
         st.info("No findings to reproduce yet.")
         return
@@ -477,7 +522,7 @@ def page_reproduce(findings):
 
 
 def page_reports(records, findings, assumptions):
-    st.header("Reports")
+    page_header("Reports", "Export saved runs and findings to share evidence with your team.", "SHARE RESULTS")
     st.caption(report_generator.DISCLAIMER)
     if not records:
         st.info("No test results yet, so there is nothing to export.")
@@ -508,8 +553,7 @@ def page_reports(records, findings, assumptions):
 
 
 def page_projects():
-    st.header("Projects")
-    st.caption("Keep targets, environments and test history together.")
+    page_header("Projects", "Keep applications, environments, and test history organized in one workspace.", "WORKSPACE")
     with st.expander("Create a project", expanded=not bool(db_manager.list_projects())):
         with st.form("new_project"):
             name = st.text_input("Project name", placeholder="Checkout reliability")
@@ -554,8 +598,7 @@ def page_projects():
 
 
 def page_device_lab():
-    st.header("Device Lab")
-    st.caption("Read-only Android device inspection through ADB. Values below are collected from the selected device.")
+    page_header("Device lab", "Connect an authorized Android device to collect real, read-only system snapshots.", "DEVICE TESTING")
     if adb_controller.adb_path():
         try:
             st.success(adb_controller.adb_version())
@@ -607,8 +650,7 @@ def page_device_lab():
 
 
 def page_test_environment():
-    st.header("Test Environment")
-    st.caption("Select a project and inspect a reproducible profile. Current executable profiles use the local HTTP harness.")
+    page_header("Test environment", "Choose a project and inspect the configuration and evidence type before running.", "CONFIGURE")
     projects = db_manager.list_projects()
     if projects:
         labels = {p["project_id"]: p["name"] for p in projects}
@@ -632,7 +674,7 @@ def page_test_environment():
 
 
 def page_history(records):
-    st.header("Test History")
+    page_header("Test history", "Search saved runs and open the complete request, evidence, and configuration details.", "ACTIVITY")
     query = st.text_input("Filter by profile, status or test ID")
     filtered = [r for r in reversed(records) if query.lower() in (r["test_id"] + r["profile_label"] + r["operation_status"]).lower()]
     if not filtered:
@@ -643,7 +685,7 @@ def page_history(records):
 
 
 def page_failure_analysis(records, findings):
-    st.header("Failure Analysis")
+    page_header("Failure analysis", "See how observed outcomes and rule-based findings are distributed across recorded runs.", "ANALYTICS")
     st.caption("Deterministic rule-based detections from recorded test evidence; likelihood weights remain team assumptions.")
     if not records:
         st.info("Run a test to build evidence for failure analysis."); return
@@ -657,14 +699,14 @@ def page_failure_analysis(records, findings):
 
 
 def page_live_monitoring():
-    st.header("Live Monitoring")
+    page_header("Live monitoring", "Inspect device snapshots during a test; continuous sampling is not available in this build.", "DEVICE TESTING")
     st.info("This build provides on-demand device snapshots in Device Lab. Continuous sampling has not been implemented, so no live metrics are presented as if collected.")
     if st.button("Open Device Lab"):
         st.session_state["page"] = "Device Lab"; st.rerun()
 
 
 def page_challenge():
-    st.header("Challenge Readiness Centre")
+    page_header("Challenge readiness", "Track the build plan, customer interviews, and evidence your team has actually collected.", "HACKFRONT INDIA")
     st.caption("Track actual preparation. Entries are stored locally in SQLite; no external validation is presumed.")
     plan = db_manager.load_challenge("build_plan", {})
     with st.form("build_plan"):
@@ -705,7 +747,7 @@ def page_challenge():
 
 
 def page_graph_explorer():
-    st.header("Neo4j Graph Explorer")
+    page_header("Graph explorer", "Explore related failures when a verified Neo4j integration is available.", "INTEGRATIONS")
     configured = all(os.environ.get(key) for key in ("NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD"))
     if not configured:
         st.info("Neo4j is not configured. Set NEO4J_URI, NEO4J_USERNAME and NEO4J_PASSWORD in the environment to enable graph storage.")
@@ -714,7 +756,7 @@ def page_graph_explorer():
 
 
 def page_settings():
-    st.header("Settings")
+    page_header("Settings", "Review this installation’s data location and local testing boundaries.", "PREFERENCES")
     st.write("Interface theme: **Dark** (the current supported theme).")
     st.code(f"SQLite database: {db_manager.database_path()}")
     st.write("ADB is read-only in Device Lab. The HTTP harness only targets its configured demo server in the current build.")
@@ -732,18 +774,25 @@ if "page" not in st.session_state and st.query_params.get("page") in PAGES:
     st.session_state["page"] = st.query_params["page"]
 
 with st.sidebar:
-    st.title("BudgetBench")
-    st.caption("Test Beyond the Flagship. Build for Every Phone.")
-    page = st.radio("Go to", PAGES, key="page")
+    st.markdown(
+        '<div class="bb-brand"><div class="bb-brand-mark">B</div><div>'
+        '<div class="bb-brand-name">BudgetBench</div>'
+        '<div class="bb-brand-caption">ANDROID RELIABILITY LAB</div></div></div>',
+        unsafe_allow_html=True)
+    st.markdown('<div class="bb-nav-label">Workspace</div>', unsafe_allow_html=True)
+    page = st.radio("Navigation", PAGES, format_func=lambda value: NAV_LABELS.get(value, value),
+                    key="page", label_visibility="collapsed")
     projects = db_manager.list_projects()
     if projects:
         labels = {p["project_id"]: p["name"] for p in projects}
         ids = list(labels)
+        st.markdown('<div class="bb-nav-label">Active project</div>', unsafe_allow_html=True)
         selected_id = st.selectbox("Active project", ids,
             index=ids.index(st.session_state.get("current_project")) if st.session_state.get("current_project") in ids else 0,
-            format_func=lambda pid: labels[pid])
+            format_func=lambda pid: labels[pid], label_visibility="collapsed")
         st.session_state["current_project"] = selected_id
     st.divider()
+    st.markdown('<div class="bb-nav-label">Demo target</div>', unsafe_allow_html=True)
     if ONLINE_MODE:
         # Locked: on a public website, a free-text address would let anyone make our server
         # send requests to any address on the internet.
