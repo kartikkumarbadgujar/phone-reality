@@ -57,13 +57,13 @@ OPERATIONS = {
         "label": "Load screen data (GET /api/data)",
         "method": "GET",
         "path": "/api/data",
-        "user_expectation": "The screen data loads, or the app shows a clear error and lets the user try again.",
+        "user_expectation": "The screen loads, or the app explains what happened and lets the user try again.",
     },
     "upload": {
         "label": "Upload a file (POST /api/upload)",
         "method": "POST",
         "path": "/api/upload",
-        "user_expectation": "The upload is saved exactly once and the user is told correctly whether it worked.",
+        "user_expectation": "The upload is saved once, and the app tells the user what happened.",
     },
 }
 
@@ -71,51 +71,48 @@ PROFILES = {
     "normal": {
         "label": "Normal",
         "short": "Normal",
-        "description": "No faults. Establishes the baseline: real requests to the local demo app.",
-        "what_happens": "Standard HTTP request / upload with no injected fault.",
+        "description": "A clean run to give you something to compare the other tests with.",
+        "what_happens": "A normal request or upload goes to the local demo app.",
         "evidence_category": GENUINE,
         "defaults": {"timeout": 3.0, "server_delay": 0.0, "fail_count": 0, "retries": 0, "loss_rate": 0.0},
-        "expected_behaviour": "Request succeeds quickly; upload stored once.",
+        "expected_behaviour": "The request succeeds and an upload appears once in the server receipts.",
     },
     "slow_network": {
         "label": "Slow Network",
         "short": "Slow network",
-        "description": "The server waits before replying, longer than the client is willing to wait. "
-                       "For uploads, the file is saved FIRST and only the reply is delayed.",
-        "what_happens": "Injected server delay (3 s) larger than the client timeout (1 s).",
+        "description": "The server waits longer than the client is prepared to wait. With an upload, it saves the file before delaying its reply.",
+        "what_happens": "The demo server waits 3 seconds; the client gives up after 1 second.",
         "evidence_category": FAULT_INJECTION,
         "defaults": {"timeout": 1.0, "server_delay": 3.0, "fail_count": 0, "retries": 0, "loss_rate": 0.0},
-        "expected_behaviour": "Client raises a real requests Timeout; for uploads the server may still have saved the file.",
+        "expected_behaviour": "The client times out. An upload may still be present in the server receipts.",
     },
     "intermittent": {
         "label": "Intermittent Connectivity",
         "short": "Intermittent",
-        "description": "The server deliberately answers HTTP 503 for the first few requests of the test, "
-                       "then recovers. Shows whether retries are enough to recover.",
-        "what_happens": "First 2 requests get HTTP 503; client retries once.",
+        "description": "The server returns HTTP 503 for the first requests, then becomes available. Try changing the retry count to see when the client recovers.",
+        "what_happens": "The first 2 requests get HTTP 503. The client retries once.",
         "evidence_category": FAULT_INJECTION,
         "defaults": {"timeout": 3.0, "server_delay": 0.0, "fail_count": 2, "retries": 1, "loss_rate": 0.0},
-        "expected_behaviour": "Both attempts receive 503, so the operation does not recover (raise retries to 2 to see recovery).",
+        "expected_behaviour": "Both attempts receive 503. Set 2 retries to watch a later attempt succeed.",
     },
     "packet_loss": {
         "label": "Packet Loss (SIMULATED)",
         "short": "Packet loss (SIM)",
-        "description": "SIMULATION: before each attempt, a seeded random number decides whether the request "
-                       "is 'lost'. Lost requests are never sent. Requests that are not lost are real.",
-        "what_happens": "Each attempt is dropped with probability loss_rate (seeded, so repeatable).",
+        "description": "A repeatable software simulation decides whether each attempt is dropped. Any attempt that gets through is a real HTTP request.",
+        "what_happens": "The seed makes the simulated drops repeatable for the same settings.",
         "evidence_category": SIMULATED,
         # seed 4 gives random numbers 0.236 and 0.103, both below 0.5, so both attempts are dropped
         "defaults": {"timeout": 3.0, "server_delay": 0.0, "fail_count": 0, "retries": 1, "loss_rate": 0.5,
                      "seed": 4},
-        "expected_behaviour": "Depends on the seed; the default seed 4 loses both attempts, seed 1 loses only the first.",
+        "expected_behaviour": "The outcome depends on the seed. The default seed drops both attempts; try another seed to compare.",
     },
 }
 
 # Shown in the condition matrix only. There are deliberately no buttons for these.
 FUTURE_PROFILES = {
-    "Process Interruption": "Needs a real Android app or emulator to kill the process and check saved state.",
-    "Resource Pressure (memory / storage)": "Needs device-level instrumentation (adb, emulator) to measure honestly.",
-    "Thermal / Battery Restrictions": "Needs a physical device or emulator; cannot be measured from a laptop HTTP client.",
+    "Process Interruption": "We need an Android app or emulator to stop a process and check whether its state survives.",
+    "Resource Pressure (memory / storage)": "These readings need to come from an Android device or emulator, not the laptop running this app.",
+    "Thermal / Battery Restrictions": "We need a phone or emulator to measure how battery and thermal limits affect an app.",
 }
 
 DEFAULT_SEED = 42  # used for the upload file content (and loss, unless a profile sets its own seed)

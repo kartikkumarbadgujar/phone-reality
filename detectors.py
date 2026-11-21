@@ -19,87 +19,76 @@ import scoring
 
 DETECTORS = {
     "DUPLICATE_UPLOAD": {
-        "title": "Retried upload was saved more than once",
+        "title": "One upload ended up with multiple server copies",
         "severity": 5,
         "rule": "upload AND server receipt_count > 1 for a single upload_id",
-        "description": "The client retried an upload whose first attempt had already been saved. "
-                       "The server stored every attempt, so one user action created several records.",
-        "expected_behaviour": "One user action creates exactly one record on the server.",
-        "user_impact": "Duplicate posts, orders or payments; the user may be charged or counted twice.",
-        "suggested_action": "Send an idempotency key (upload_id) with every upload and make the server "
-                            "store each key only once. Tick 'Server de-duplicates' in Run Tests to see the fix.",
+        "description": "A retry reached the server after the first upload had already been saved. The server kept both copies.",
+        "expected_behaviour": "One upload should create one saved copy, even if the client retries.",
+        "user_impact": "In a real app, a repeated action could create duplicate posts, orders or payments.",
+        "suggested_action": "Give each upload an idempotency key and have the server accept that key only once. Turn on server de-duplication in Run Tests to try the fix.",
     },
     "AMBIGUOUS_UPLOAD": {
-        "title": "Client reported failure but the server saved the upload",
+        "title": "The upload succeeded, but the client showed an error",
         "severity": 4,
         "rule": "upload AND client did not get a success reply AND server receipt_count >= 1",
-        "description": "The server saved the file and then replied too slowly. The client timed out and "
-                       "treats the upload as failed, although it actually succeeded.",
-        "expected_behaviour": "The app tells the user the true state of the upload.",
-        "user_impact": "User sees an error for something that worked, retries, and may create duplicates "
-                       "or give up and lose trust in the app.",
-        "suggested_action": "After a timeout, ask the server for the upload's status (by upload_id) before "
-                            "showing an error or retrying. Show 'checking...' instead of 'failed'.",
+        "description": "The server saved the file, but its reply arrived after the client timed out. The client reported failure even though the upload is there.",
+        "expected_behaviour": "After a timeout, the app should check whether the upload was saved before telling the user it failed.",
+        "user_impact": "The user may try again and create a duplicate, or abandon something that actually worked.",
+        "suggested_action": "Use the upload ID to check the server's receipt before showing an error or retrying. Let the user know the app is checking.",
     },
     "UPLOAD_NOT_SAVED": {
-        "title": "Upload never reached the server",
+        "title": "The upload did not reach the server",
         "severity": 4,
         "rule": "upload AND client did not get a success reply AND server receipt_count == 0",
-        "description": "The upload failed and the server has no copy of it.",
-        "expected_behaviour": "The upload is eventually saved, or the user's file is kept on the phone "
-                            "and retried later.",
-        "user_impact": "The user's photo/form is lost unless the app keeps it and retries.",
-        "suggested_action": "Keep the file in a local outbox and retry with back-off when the "
-                            "connection returns; show the pending state to the user.",
+        "description": "The request failed, and the server has no receipt for the upload.",
+        "expected_behaviour": "Keep the file safe and retry later, or tell the user clearly that it was not saved.",
+        "user_impact": "Without a saved copy or a retry, the user's photo or form could be lost.",
+        "suggested_action": "Keep the file in a local pending queue and retry with a short wait between attempts when the connection returns.",
     },
     "UPLOAD_INTEGRITY": {
-        "title": "Upload reported success but the server copy is missing or different",
+        "title": "The saved file does not match the successful upload",
         "severity": 5,
         "rule": "upload AND client got success AND (receipt_count == 0 OR server sha256 != client sha256)",
-        "description": "The client was told the upload worked, but the server's copy does not match.",
-        "expected_behaviour": "A success reply means the exact file is stored.",
-        "user_impact": "Silent data loss or corruption.",
-        "suggested_action": "Compare a checksum (SHA-256) on the server and only reply success when it matches.",
+        "description": "The client received a success response, but the server has no matching receipt or file hash.",
+        "expected_behaviour": "A success response should mean the server has the exact file the client sent.",
+        "user_impact": "The app may appear to work while the user's data is missing or damaged.",
+        "suggested_action": "Compare the file's SHA-256 hash on both sides, and only report success when they match.",
     },
     "RECOVERY_FAILURE": {
-        "title": "Operation did not recover after retrying",
+        "title": "The retries did not get the request through",
         "severity": 4,
         "rule": "retries > 0 AND no attempt succeeded",
-        "description": "The client retried, but every attempt failed, so the operation never recovered.",
-        "expected_behaviour": "A short, temporary failure is hidden from the user by retrying.",
-        "user_impact": "The user is stuck on an error even though the problem was temporary.",
-        "suggested_action": "Use more retries with increasing waits (exponential back-off) for temporary "
-                            "errors like 503, and give the user a clear 'Try again' button.",
+        "description": "The client tried again, but none of the attempts succeeded.",
+        "expected_behaviour": "A short outage should recover when another attempt gets through, or the app should explain what the user can do next.",
+        "user_impact": "The user is left at an error even if the service comes back a moment later.",
+        "suggested_action": "For temporary errors such as HTTP 503, retry with increasing waits and give the user a clear way to try again.",
     },
     "TIMEOUT": {
-        "title": "Request timed out",
+        "title": "The server replied too late",
         "severity": 3,
         "rule": "final operation status is TIMEOUT (requests raised ReadTimeout)",
-        "description": "No reply arrived within the client's timeout.",
-        "expected_behaviour": "The request completes, or the app shows a clear message and offers a retry.",
-        "user_impact": "Spinner followed by an error; screen may stay empty.",
-        "suggested_action": "Choose timeouts that fit slow networks, show progress, and handle the "
-                            "Timeout exception with a helpful message and a retry option.",
+        "description": "The client stopped waiting before the server sent its reply.",
+        "expected_behaviour": "Finish the request, or explain that it is taking longer and offer a safe retry.",
+        "user_impact": "The screen may stop loading without telling the user whether anything happened.",
+        "suggested_action": "Choose a timeout that fits the operation, show progress, and handle timeouts with a useful message and retry option.",
     },
     "HTTP_FAILURE": {
-        "title": "Server returned an error status",
+        "title": "The server returned an error",
         "severity": 3,
         "rule": "final operation status is HTTP_ERROR (status code not 2xx)",
-        "description": "The server answered with an error status code (for example 503).",
-        "expected_behaviour": "The request succeeds, or the app explains the error and retries.",
-        "user_impact": "Operation fails; if the app ignores the status code the user sees nothing happen.",
-        "suggested_action": "Check the status code on every response, retry 5xx errors with back-off, "
-                            "and show a clear message.",
+        "description": "The server answered, but its status code shows that the request failed (for example, HTTP 503).",
+        "expected_behaviour": "The request succeeds, or the app explains the problem and retries when it is safe to do so.",
+        "user_impact": "If the app ignores the response code, the action can fail without any useful message.",
+        "suggested_action": "Check every response code. Retry temporary 5xx errors with a wait between attempts, and show the user what happened.",
     },
     "REQUEST_LOST_SIMULATED": {
-        "title": "Request lost (SIMULATED packet loss)",
+        "title": "A request was dropped in the simulation",
         "severity": 2,
         "rule": "final operation status is LOST_SIMULATED",
-        "description": "SIMULATION: the packet-loss model dropped the last attempt. This is not a "
-                       "measurement of a real network.",
-        "expected_behaviour": "Lost requests are retried until they get through.",
-        "user_impact": "Same as a timeout for the user, if loss really happens on their network.",
-        "suggested_action": "Use retries with back-off; test on a real throttled network to confirm.",
+        "description": "The packet-loss model dropped the last attempt before it was sent. This result comes from a simulation, not a real network.",
+        "expected_behaviour": "Retry a dropped request when it is safe, and tell the user if it still does not get through.",
+        "user_impact": "A real dropped request can feel like a timeout to the user.",
+        "suggested_action": "Use retries with a short wait between them, then confirm the behavior on a real network.",
     },
 }
 
@@ -208,7 +197,7 @@ def reproduction_steps(record):
     config = record["config"]
     steps = [
         "Start the demo app in its own terminal:  python demo_app.py",
-        f"In PhoneReality open 'Run Tests' and choose operation '{record['operation_label']}' "
+        f"In BudgetBench, open 'Run Tests' and choose '{record['operation_label']}' "
         f"and profile '{record['profile_label']}'.",
         f"Set: client timeout {config['timeout']} s, server delay {config['server_delay']} s, "
         f"injected 503 failures {config['fail_count']}, retries {config['retries']}, "

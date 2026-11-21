@@ -217,8 +217,8 @@ def page_dashboard(records, findings):
         '<section class="bb-hero"><div class="bb-hero-content">'
         '<div class="bb-hero-label">HackFront India · PS T1.2</div>'
         '<div class="bb-hero-title">Test beyond the flagship.</div>'
-        '<p class="bb-hero-copy">Find reliability issues under slower responses and intermittent service. '
-        'Capture evidence, understand impact, and reproduce the behavior.</p>'
+        '<p class="bb-hero-copy">Slow the reply, try the request again, and see what the server kept. '
+        'BudgetBench helps you follow a failure from the first request to the fix.</p>'
         '</div></section>', unsafe_allow_html=True)
     action_left, action_right = st.columns([1, 1])
     action_left.button("▶   Start a test", type="primary", use_container_width=True,
@@ -236,13 +236,13 @@ def page_dashboard(records, findings):
     summary[3].metric("Device snapshots", db_counts["device_snapshots"])
     summary[4].metric("Open findings", open_findings)
     if not records:
-        st.info("No tests have been run yet. Your reliability workspace is ready when you are.")
+        st.info("No tests have been run yet. Start with a normal upload, then add a delay and compare what the client saw with the server receipt.")
         st.markdown(
-            '<div class="bb-empty"><div class="bb-empty-title">Your reliability workspace is ready</div>'
-            '<div class="bb-empty-copy">There are no test runs yet. Start with the built-in upload scenario '
-            'to see how delayed responses can create ambiguous uploads and how idempotency prevents duplicates.</div></div>',
+            '<div class="bb-empty"><div class="bb-empty-title">Your first test is one click away</div>'
+            '<div class="bb-empty-copy">Try the upload scenario. When the reply is delayed, the server may save the file '
+            'even though the client times out. Turn on de-duplication and see the difference.</div></div>',
             unsafe_allow_html=True)
-        st.caption("Metrics fill in from saved projects, test runs, findings, and device snapshots. No sample results are shown.")
+        st.caption("These numbers come from your saved projects, test runs, findings and device snapshots. We do not add sample data.")
         return
 
     total = len(records)
@@ -256,9 +256,8 @@ def page_dashboard(records, findings):
     c3.metric("Operations failed (app)", total - succeeded)
     c4.metric("Harness verdict not PASS", total - passed)
     c5.metric("Findings (high priority)", f"{len(findings)} ({high})")
-    st.caption("**Operation failed** = the app's request failed (often on purpose, because we injected a fault). "
-               "**Harness verdict** = whether BudgetBench reproduced the outcome it predicted from the settings. "
-               "A deliberately caused timeout that is observed as predicted counts as a verdict PASS.")
+    st.caption("**Operation result** is what the client experienced. **Test verdict** tells you whether that matched the prediction. "
+               "For example, a timeout we deliberately set up can still be a passing test if it happens as expected.")
 
     by_category = {c: sum(r["evidence_category"] == c for r in records) for c in CATEGORY_BADGES}
     c1, c2, c3 = st.columns(3)
@@ -286,9 +285,8 @@ def page_dashboard(records, findings):
 
 
 def page_condition_matrix(records):
-    page_header("Condition matrix", "Compare each runnable profile, the evidence it produces, and what remains outside this build.", "TEST DESIGN")
-    st.caption("What each condition profile does, how trustworthy its evidence is, and the latest real result. "
-               "The evidence category of a run is decided from the settings actually used, not the profile name.")
+    page_header("Condition matrix", "See what each profile changes, what the test can tell you, and what we have not built yet.", "TEST DESIGN")
+    st.caption("The latest results are listed beside each profile. Evidence labels come from the settings used for that run, not just its profile name.")
 
     def latest(profile, operation):
         runs = [r for r in records if r["profile"] == profile and r["operation"] == operation]
@@ -312,24 +310,23 @@ def page_condition_matrix(records):
     st.subheader("Implemented profiles")
     st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
-    st.subheader("Not implemented — future work")
-    st.caption("There are deliberately no buttons for these: we will not fake device-level measurements.")
+    st.subheader("Not available yet")
+    st.caption("These tests need device or emulator support. We leave them out instead of showing pretend measurements.")
     future = pd.DataFrame([{"Profile": name, "Why it is not in this prototype": reason}
                            for name, reason in tester.FUTURE_PROFILES.items()])
     st.dataframe(future, hide_index=True, width="stretch")
 
     st.markdown("**Evidence categories**")
-    st.markdown(f"- {CATEGORY_BADGES['GENUINE']} a real request to the local demo app, with no fault.\n"
-                f"- {CATEGORY_BADGES['FAULT_INJECTION']} the demo app misbehaves on purpose (delay, HTTP 503). "
-                "The client's reaction (real timeout, real status code, real saved file) is genuinely measured. "
-                "It is **not** a measurement of a real mobile network.\n"
-                f"- {CATEGORY_BADGES['SIMULATED']} a model decides what happens (seeded packet loss). "
-                "Treat results as hypotheses.")
+    st.markdown(f"- {CATEGORY_BADGES['GENUINE']} a real request to the local demo app without an injected fault.\n"
+                f"- {CATEGORY_BADGES['FAULT_INJECTION']} the demo app adds a delay or returns HTTP 503. "
+                "The response and any saved file are real; the network condition is controlled.\n"
+                f"- {CATEGORY_BADGES['SIMULATED']} packet loss is generated by a repeatable model. "
+                "Use it to explore an idea, then verify it on a real network.")
 
 
 def page_run_tests(base_url):
-    page_header("Run a test", "Choose an operation and condition, review the expected outcome, then run the real HTTP scenario.", "TEST LAB")
-    st.markdown('<div class="bb-section-heading"><h3>1. Choose the scenario</h3></div>', unsafe_allow_html=True)
+    page_header("Run a test", "Choose a request, set the conditions and check what you expect before you run it.", "TEST LAB")
+    st.markdown('<div class="bb-section-heading"><h3>1. Pick what to test</h3></div>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     operation = c1.selectbox("Operation", list(tester.OPERATIONS),
                              format_func=lambda k: tester.OPERATIONS[k]["label"])
@@ -345,7 +342,7 @@ def page_run_tests(base_url):
     key = f"{operation}_{profile}"  # new widget keys per combination, so defaults reload when you switch
     is_upload = operation == "upload"
 
-    st.markdown('<div class="bb-section-heading"><h3>2. Tune the conditions</h3></div>', unsafe_allow_html=True)
+    st.markdown('<div class="bb-section-heading"><h3>2. Set the conditions</h3></div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     timeout = c1.number_input("Client timeout (s)", 0.2, 60.0, float(defaults["timeout"]), 0.1,
                               key=f"timeout_{key}", help="How long the client waits for a reply before giving up.")
@@ -379,7 +376,7 @@ def page_run_tests(base_url):
         return
 
     predicted, reason = tester.predict_status(config)
-    st.markdown('<div class="bb-section-heading"><h3>3. Review before running</h3></div>', unsafe_allow_html=True)
+    st.markdown('<div class="bb-section-heading"><h3>3. Check the expected result</h3></div>', unsafe_allow_html=True)
     with st.container(border=True):
         prediction_left, prediction_right = st.columns([1, 2])
         prediction_left.markdown(f"**Expected outcome**  \n{badge(STATUS_BADGES, predicted)}")
@@ -408,15 +405,15 @@ def page_run_tests(base_url):
 
 
 def page_findings(findings, assumptions):
-    page_header("Findings", "Review detector-backed issues, evidence, and transparent priority scores.", "INVESTIGATE")
-    with st.expander("Scoring assumptions (editable) — these are NOT measurements"):
+    page_header("Findings", "See what the tests caught, open the supporting evidence and decide what to look at first.", "INVESTIGATE")
+    with st.expander("Priority weights (editable; these are team estimates)"):
         st.caption(scoring.ASSUMPTION_SOURCE)
         with st.form("assumptions"):
-            st.markdown("**Likelihood** — how often we assume users are in this condition (1 = rare, 5 = very common)")
+            st.markdown("**Likelihood** - how often you expect this condition (1 = rare, 5 = common)")
             cols = st.columns(len(tester.PROFILES))
             likelihood = {k: col.number_input(p["label"], 1, 5, int(assumptions["likelihood"][k]), key=f"lk_{k}")
                           for col, (k, p) in zip(cols, tester.PROFILES.items())}
-            st.markdown("**Impact weight** — how much this operation matters to the user (1 = minor, 5 = critical)")
+            st.markdown("**Impact** - how serious this operation is for the user (1 = minor, 5 = critical)")
             cols = st.columns(len(tester.OPERATIONS))
             impact = {k: col.number_input(o["label"], 1, 5, int(assumptions["impact_weight"][k]), key=f"iw_{k}")
                       for col, (k, o) in zip(cols, tester.OPERATIONS.items())}
@@ -433,7 +430,7 @@ def page_findings(findings, assumptions):
             st.rerun()
 
     if not findings:
-        st.info("No findings yet. Findings appear automatically when a detector fires during a real test run.")
+        st.info("Nothing to review yet. Run a test that triggers a detector and its evidence will show up here.")
         return
 
     summary = pd.DataFrame([{
@@ -454,9 +451,9 @@ def page_findings(findings, assumptions):
 
 
 def page_reproduce(findings):
-    page_header("Reproduce a finding", "Rerun the original configuration to check whether the same detector fires again.", "INVESTIGATE")
+    page_header("Reproduce a finding", "Run the same settings again and see whether the detector catches the issue again.", "INVESTIGATE")
     if not findings:
-        st.info("No findings to reproduce yet.")
+        st.info("There is nothing to replay yet. Once a test produces a finding, you can rerun it here.")
         return
     by_id = {f["finding_id"]: f for f in findings}
     ids = list(by_id)
@@ -479,8 +476,7 @@ def page_reproduce(findings):
         except ValueError as error:
             valid, problem = False, str(error)
     if not valid:
-        st.error(f"The original configuration is unavailable ({problem}). Re-running is disabled so that "
-                 "BudgetBench never silently runs a different test.")
+        st.error(f"We cannot use the saved settings ({problem}), so this test is disabled. We will not silently substitute a different setup.")
         return
 
     params = pd.DataFrame([
@@ -502,21 +498,21 @@ def page_reproduce(findings):
 
     st.markdown("**Steps**")
     st.markdown("\n".join(f"{i}. {step}" for i, step in enumerate(finding["reproduction_steps"], start=1)))
-    st.markdown("**Same test from the terminal** (run inside the project folder with the virtual environment active)")
+    st.markdown("**Run this from a terminal** (from the project folder, with the virtual environment active)")
     st.code(finding["reproduction_command"], language="powershell")
     if finding["curl_commands"]:
-        st.markdown("**Without BudgetBench** (one attempt, plain `curl.exe` in PowerShell)")
+        st.markdown("**Try one request without BudgetBench** (using `curl.exe` in PowerShell)")
         st.code("\n".join(finding["curl_commands"]), language="powershell")
-        st.caption("Use a new fault_key / upload_id (e.g. repro-2) each time: the demo app remembers them.")
+        st.caption("Use a fresh `fault_key` or `upload_id` each time. The demo app remembers previous attempts.")
     else:
-        st.caption("No curl equivalent: this condition is SIMULATED and only exists inside BudgetBench.")
+        st.caption("There is no curl version of this test. Packet loss is simulated inside BudgetBench.")
 
     if st.button("Re-run original configuration", type="primary"):
         ok, message = tester.check_server(config["base_url"])
         if not ok:
             st.error(message)
         else:
-            with st.spinner("Re-running with the original settings — waiting for real replies..."):
+            with st.spinner("Running the test again with its saved settings..."):
                 reproduced = tester.run_test(config)
                 db_manager.index_run(reproduced, st.session_state.get("current_project"))
                 st.session_state["repro_result"] = (chosen, reproduced)
@@ -525,17 +521,17 @@ def page_reproduce(findings):
     if result and result[0] == chosen:
         record = result[1]
         if chosen in record["finding_ids"]:
-            st.success(f"Reproduced: detector fired again in {record['test_id']}.")
+            st.success(f"The same detector fired again. Run ID: {record['test_id']}.")
         else:
-            st.warning(f"Not reproduced in {record['test_id']}: the same detector did not fire this time.")
+            st.warning(f"The detector did not fire this time. Run ID: {record['test_id']}.")
         show_record(record)
 
 
 def page_reports(records, findings, assumptions):
-    page_header("Reports", "Export saved runs and findings to share evidence with your team.", "SHARE RESULTS")
+    page_header("Reports", "Download your saved test results and findings to share with your team.", "SHARE RESULTS")
     st.caption(report_generator.DISCLAIMER)
     if not records:
-        st.info("No test results yet, so there is nothing to export.")
+        st.info("There are no test results to download yet. Run a test first, then come back here.")
         return
     stamp = datetime.now().strftime("%Y%m%d-%H%M")
     st.markdown(f"Exports contain **{len(records)} real test run(s)** and **{len(findings)} finding(s)**.")
@@ -553,8 +549,8 @@ def page_reports(records, findings, assumptions):
         st.markdown(markdown)
 
     st.divider()
-    st.markdown("**Start a fresh session**")
-    sure = st.checkbox("I understand this deletes all saved test results")
+    st.markdown("**Clear saved test results**")
+    sure = st.checkbox("I understand this will permanently remove the saved test results")
     if st.button("Clear all results", disabled=not sure):
         storage.clear_results()
         st.session_state.pop("last_run", None)
@@ -563,7 +559,7 @@ def page_reports(records, findings, assumptions):
 
 
 def page_projects():
-    page_header("Projects", "Keep applications, environments, and test history organized in one workspace.", "WORKSPACE")
+    page_header("Projects", "Keep each app, its environment and its test history together.", "WORKSPACE")
     with st.expander("Create a project", expanded=not bool(db_manager.list_projects())):
         with st.form("new_project"):
             name = st.text_input("Project name", placeholder="Checkout reliability")
@@ -576,16 +572,16 @@ def page_projects():
             submitted = st.form_submit_button("Create project", type="primary")
         if submitted:
             if len(name.strip()) < 2:
-                st.error("Enter a project name with at least two characters.")
+                st.error("Give the project a name with at least two characters.")
             else:
                 pid = db_manager.save_project(name, description, target_type, target_url, package, environment)
                 st.session_state["current_project"] = pid
-                st.success(f"Project {pid} created.")
+                st.success(f"Project created ({pid}).")
                 st.rerun()
     query = st.text_input("Search projects", key="project_search")
     projects = db_manager.list_projects(query)
     if not projects:
-        st.info("No projects match this search. Create one above to start organizing runs.")
+        st.info("No projects match that search. Create a project above to get started.")
         return
     for project in projects:
         with st.container(border=True):
@@ -608,7 +604,7 @@ def page_projects():
 
 
 def page_device_lab():
-    page_header("Device lab", "Connect an authorized Android device to collect real, read-only system snapshots.", "DEVICE TESTING")
+    page_header("Device lab", "Connect an Android phone to read its available system details. BudgetBench does not change the device.", "DEVICE TESTING")
     if adb_controller.adb_path():
         try:
             st.success(adb_controller.adb_version())
@@ -616,12 +612,12 @@ def page_device_lab():
         except adb_controller.ADBError as error:
             st.error(str(error)); devices = []
     else:
-        st.warning("ADB is not installed or is not on PATH. Install Android Platform Tools, enable USB debugging, authorize this computer, then refresh.")
+        st.warning("ADB was not found. Install Android Platform Tools, turn on USB debugging, approve this computer on the phone, then refresh.")
         devices = []
     if st.button("Refresh devices"):
         st.rerun()
     if not devices:
-        st.info("No ADB devices detected. This page remains usable without a phone; connect an authorized device to collect real measurements.")
+        st.info("No Android phone is connected right now. You can still use the rest of BudgetBench; connect an authorized phone when you want a device snapshot.")
     else:
         labels = [f"{d['model_hint'] or 'Android device'} · {d['state']} · {d['serial']}" for d in devices]
         chosen = st.selectbox("Connected devices", range(len(devices)), format_func=lambda i: labels[i])
@@ -630,11 +626,11 @@ def page_device_lab():
             st.warning(f"Device state is {device['state']}. Unlock the phone and approve the USB debugging prompt.")
         elif st.button("Collect device snapshot", type="primary"):
             try:
-                with st.spinner("Reading device properties and system diagnostics…"):
+                with st.spinner("Reading the phone's available details..."):
                     details = adb_controller.collect_snapshot(device["serial"])
                     db_manager.save_device_snapshot(device["serial"], details)
                 st.session_state["device_snapshot"] = details
-                st.success("Device snapshot saved.")
+                st.success("Snapshot saved.")
             except adb_controller.ADBError as error:
                 st.error(f"Could not collect the snapshot: {error}")
         details = st.session_state.get("device_snapshot")
@@ -649,7 +645,7 @@ def page_device_lab():
                 value = details.get(key)
                 shown = f"{value:,} {unit}" if isinstance(value, (int, float)) and unit == "bytes" else (f"{value}{unit}" if value is not None else "Unavailable")
                 cols[index % 4].metric(label, shown)
-            st.caption("RAM is system-wide; /data is filesystem capacity rather than user-visible storage. Battery/thermal values depend on manufacturer support.")
+            st.caption("RAM is for the whole system, and `/data` is a filesystem reading. Battery and temperature details vary by phone.")
     history = db_manager.list_snapshots()
     st.subheader("Saved device snapshots")
     if history:
@@ -660,7 +656,7 @@ def page_device_lab():
 
 
 def page_test_environment():
-    page_header("Test environment", "Choose a project and inspect the configuration and evidence type before running.", "CONFIGURE")
+    page_header("Test environment", "Choose a project and see what each test profile changes before you run it.", "TEST SETUP")
     projects = db_manager.list_projects()
     if projects:
         labels = {p["project_id"]: p["name"] for p in projects}
@@ -671,51 +667,51 @@ def page_test_environment():
     key = st.selectbox("Profile", [k for k, _ in profiles], format_func=lambda k: tester.PROFILES[k]["label"])
     profile = tester.PROFILES[key]
     st.markdown(profile["description"])
-    st.info(f"Evidence: {tester.CATEGORY_LABELS[profile['evidence_category']]}. {profile['what_happens']}")
+    st.info(f"What this result means: {tester.CATEGORY_LABELS[profile['evidence_category']]}. {profile['what_happens']}")
     st.json(profile["defaults"])
     if key == "packet_loss":
-        st.warning("Packet loss is a deterministic software simulation; it does not shape the phone or network.")
+        st.warning("This packet-loss scenario is simulated in software. It does not change the phone or its network.")
     if key in ("normal", "slow_network", "intermittent", "packet_loss"):
         st.button("Configure this profile in Run Tests", type="primary",
                   on_click=navigate_to_profile, args=(key,))
-    st.subheader("Not available in this build")
-    st.write("Real network shaping, low-storage/memory pressure, native app journeys, process interruption and thermal throttling require additional device or emulator instrumentation. No controls claim these actions have been performed.")
+    st.subheader("What we have not added yet")
+    st.write("Network shaping, memory or storage pressure, native app journeys, process interruption and thermal tests need more device or emulator work. This build does not claim to run them.")
 
 
 def page_history(records):
-    page_header("Test history", "Search saved runs and open the complete request, evidence, and configuration details.", "ACTIVITY")
+    page_header("Test history", "Find a saved run and open the request, evidence and settings behind it.", "ACTIVITY")
     query = st.text_input("Filter by profile, status or test ID")
     filtered = [r for r in reversed(records) if query.lower() in (r["test_id"] + r["profile_label"] + r["operation_status"]).lower()]
     if not filtered:
-        st.info("No saved runs match this filter."); return
+        st.info("No saved runs match that search. Try a test ID, profile or result status."); return
     st.dataframe(pd.DataFrame([{"Test ID":r["test_id"],"Time":r["timestamp"],"Profile":r["profile_label"],"Operation":r["operation_label"],"Result":r["operation_status"],"Verdict":r["verdict"],"Evidence":r["evidence_category"],"Duration (s)":r["duration_s"]} for r in filtered]), hide_index=True, width="stretch")
     choice = st.selectbox("Open run details", [r["test_id"] for r in filtered])
     show_record(next(r for r in filtered if r["test_id"] == choice))
 
 
 def page_failure_analysis(records, findings):
-    page_header("Failure analysis", "See how observed outcomes and rule-based findings are distributed across recorded runs.", "ANALYTICS")
-    st.caption("Deterministic rule-based detections from recorded test evidence; likelihood weights remain team assumptions.")
+    page_header("Failure analysis", "Review the outcomes and findings from your saved test runs.", "ANALYSIS")
+    st.caption("Findings come from fixed rules applied to saved evidence. The likelihood weights are estimates your team can change.")
     if not records:
-        st.info("Run a test to build evidence for failure analysis."); return
+        st.info("Run a test first. Its results will appear here."); return
     categories = {}
     for r in records:
         categories[r["operation_status"]] = categories.get(r["operation_status"], 0) + 1
     st.bar_chart(pd.Series(categories, name="Runs"))
     if findings:
         st.dataframe(pd.DataFrame([{"Finding":f["title"],"Severity":f["severity"],"Priority":f["priority"]["percent"],"Occurrences":f["occurrences"],"Evidence":f["evidence_category"]} for f in findings]).sort_values("Priority", ascending=False), hide_index=True, width="stretch")
-    st.caption("No user-population estimates are inferred from local test counts.")
+    st.caption("These local test counts do not tell us how many users would be affected.")
 
 
 def page_live_monitoring():
-    page_header("Live monitoring", "Inspect device snapshots during a test; continuous sampling is not available in this build.", "DEVICE TESTING")
-    st.info("This build provides on-demand device snapshots in Device Lab. Continuous sampling has not been implemented, so no live metrics are presented as if collected.")
+    page_header("Live monitoring", "Continuous monitoring is not available yet. You can take a device snapshot in Device Lab.", "DEVICE TESTING")
+    st.info("Device Lab reads a snapshot when you ask it to. This build does not collect live metrics in the background.")
     st.button("Open Device Lab", on_click=navigate_to, args=("Device Lab",))
 
 
 def page_challenge():
-    page_header("Challenge readiness", "Track the build plan, customer interviews, and evidence your team has actually collected.", "HACKFRONT INDIA")
-    st.caption("Track actual preparation. Entries are stored locally in SQLite; no external validation is presumed.")
+    page_header("Challenge readiness", "Keep your build plan, interview notes and supporting evidence in one place.", "HACKFRONT INDIA")
+    st.caption("These notes stay in this installation. Add evidence as you collect it; the tracker does not assume interviews or validation have happened.")
     plan = db_manager.load_challenge("build_plan", {})
     with st.form("build_plan"):
         status = st.text_area("Current prototype status", plan.get("status", ""))
@@ -739,35 +735,35 @@ def page_challenge():
         change = st.text_input("Product change")
         interview_save = st.form_submit_button("Record interview")
     if interview_save:
-        if not discovery.strip(): st.error("Add a discovery before saving the interview.")
+        if not discovery.strip(): st.error("Add a note about what you learned before saving this interview.")
         else:
             interviews.append({"date":str(date),"segment":segment,"method":method,"assumption":assumption,"discovery":discovery,"evidence":evidence,"change":change})
             db_manager.save_challenge("interviews", interviews); st.success("Interview saved.")
     st.metric("Interviews recorded", len(interviews))
     if interviews: st.dataframe(pd.DataFrame(interviews), hide_index=True, width="stretch")
-    st.subheader("Persona use case matrix")
+    st.subheader("Who we are building for")
     st.dataframe(pd.DataFrame([
       {"Segment":"Developers and QA Engineers","Problem":"Failures under constrained conditions","Use case":"Run tests and reproduce issues","Supporting feature":"HTTP harness, findings and reproduction","Status":"Implemented for demo HTTP target"},
       {"Segment":"QA Leads and Engineering Managers","Problem":"Compare reliability across runs","Use case":"Review history and priority","Supporting feature":"History, findings and analysis","Status":"Partially implemented"},
       {"Segment":"Agencies and Startup Founders","Problem":"Share clear client evidence","Use case":"Generate test reports","Supporting feature":"JSON/CSV/Markdown exports","Status":"Implemented for recorded tests"},
     ]), hide_index=True, width="stretch")
-    st.warning("ArgosX baseline and final scan reports have not been uploaded. Do not mark security scanning complete without evidence.")
+    st.warning("There are no ArgosX scan reports attached yet, so security scanning is still unverified.")
 
 
 def page_graph_explorer():
-    page_header("Graph explorer", "Explore related failures when a verified Neo4j integration is available.", "INTEGRATIONS")
+    page_header("Graph explorer", "A Neo4j connection is not available in this build yet.", "INTEGRATIONS")
     configured = all(os.environ.get(key) for key in ("NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD"))
     if not configured:
-        st.info("Neo4j is not configured. Set NEO4J_URI, NEO4J_USERNAME and NEO4J_PASSWORD in the environment to enable graph storage.")
+        st.info("Neo4j is not configured. Add NEO4J_URI, NEO4J_USERNAME and NEO4J_PASSWORD to the environment to connect it.")
         return
-    st.warning("Credentials are present, but this build does not yet verify a Neo4j connection or write graph relationships. No graph is shown as active.")
+    st.warning("Connection details are set, but this build does not test the connection or write graph data yet.")
 
 
 def page_settings():
-    page_header("Settings", "Review this installation’s data location and local testing boundaries.", "PREFERENCES")
-    st.write("Interface theme: **Dark** (the current supported theme).")
+    page_header("Settings", "Check where this installation stores data and which targets it can test.", "SETTINGS")
+    st.write("The interface currently uses the dark theme.")
     st.code(f"SQLite database: {db_manager.database_path()}")
-    st.write("ADB is read-only in Device Lab. The HTTP harness only targets its configured demo server in the current build.")
+    st.write("Device Lab only reads information from ADB. HTTP tests are restricted to the configured local demo server.")
 
 
 # ---------------------------------------------------------------- layout
@@ -806,9 +802,7 @@ with st.sidebar:
         # send requests to any address on the internet.
         base_url = start_builtin_demo_app()
         st.text_input("Demo app address", value=base_url, disabled=True)
-        st.caption("**Online version.** The demo app runs inside this same server, and tests still send "
-                   "real HTTP requests to it. Results are shared by everyone using this link and are "
-                   "wiped when the app restarts.")
+        st.caption("**Hosted demo.** Tests still send real HTTP requests to the demo service. Everyone using this link shares the same workspace, and saved data may be cleared when the service restarts.")
     else:
         base_url = st.text_input("Demo app address", value=tester.DEFAULT_BASE_URL)
         parsed = urlsplit(base_url)
@@ -817,7 +811,7 @@ with st.sidebar:
         except ValueError:
             host_is_loopback = False
         if parsed.scheme != "http" or not host_is_loopback:
-            st.error("For this local demo build, the target must be localhost or a loopback IP. Remote URL testing is not enabled.")
+            st.error("Use localhost or a loopback address for this demo. Testing remote URLs is disabled.")
             base_url = tester.DEFAULT_BASE_URL
     server_ok, server_message = tester.check_server(base_url)
     if server_ok:

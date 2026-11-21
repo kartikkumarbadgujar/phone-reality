@@ -13,9 +13,9 @@ import io
 import json
 from datetime import datetime
 
-DISCLAIMER = ("Results come from a local demo app on a laptop. FAULT_INJECTION results are genuine "
-              "HTTP outcomes caused by deliberate faults; SIMULATED results depend on a model. "
-              "None of these are measurements of real Indian mobile networks or Android devices.")
+DISCLAIMER = ("These tests ran against BudgetBench's local demo app. A fault-injection run uses real HTTP "
+              "requests with a delay or error added on purpose. Packet-loss results are simulated. "
+              "They do not measure a real Indian mobile network or the performance of an Android app.")
 
 RESULT_COLUMNS = [
     "test_id", "timestamp", "profile", "operation", "evidence_category",
@@ -134,7 +134,7 @@ def findings_markdown(findings, assumptions):
         "",
     ]
     if not findings:
-        lines.append("No findings yet. Run some tests first.")
+        lines.append("There are no findings yet. Run a test and check back here.")
     for f in findings:
         p = f["priority"]
         lines += [
