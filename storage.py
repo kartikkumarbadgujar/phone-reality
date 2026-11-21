@@ -12,6 +12,8 @@ Set the environment variable PHONEREALITY_DATA_DIR to use a different folder
 
 import json
 import os
+import threading
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -21,6 +23,9 @@ REQUIRED_KEYS = {
     "evidence_category", "expected_status", "operation_status", "verdict", "duration_s",
     "attempts", "evidence", "actual_outcome", "detections",
 }
+
+# Streamlit can service multiple sessions in one process; serialize read/modify/write operations.
+_STORAGE_LOCK = threading.RLock()
 
 
 def data_dir():
@@ -39,33 +44,46 @@ def assumptions_path():
 
 def _write_json(path, value):
     """Write to a temporary file first, then swap it in, so a crash cannot leave half a file."""
-    temp = Path(str(path) + ".tmp")
-    temp.write_text(json.dumps(value, indent=2, ensure_ascii=False), encoding="utf-8")
-    os.replace(temp, path)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+    with _STORAGE_LOCK:
+        try:
+            temp.write_text(json.dumps(value, indent=2, ensure_ascii=False), encoding="utf-8")
+            os.replace(temp, path)
+        finally:
+            temp.unlink(missing_ok=True)
 
 
 def load_results(path=None):
     """Return (records, warning). warning is None when everything is fine."""
     path = Path(path or results_path())
-    if not path.exists():
-        return [], None
-    text = path.read_text(encoding="utf-8").strip()
-    if not text:
-        return [], None
-    try:
-        records = json.loads(text)
-        if not isinstance(records, list):
-            raise ValueError("results file must contain a JSON list")
-        good = [r for r in records if isinstance(r, dict) and REQUIRED_KEYS <= r.keys()]
-        if len(good) < len(records):
-            return good, (f"{len(records) - len(good)} record(s) in the results file were incomplete "
-                          "and are being ignored.")
-        return good, None
-    except (json.JSONDecodeError, ValueError) as error:
-        backup = path.with_name(f"results.corrupt-{datetime.now():%Y%m%d-%H%M%S}.json")
-        os.replace(path, backup)
-        return [], (f"The results file could not be read ({error}). "
-                    f"It was moved to {backup.name} and a new, empty file will be used.")
+    with _STORAGE_LOCK:
+        if not path.exists():
+            return [], None
+        try:
+            text = path.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeError) as error:
+            return [], f"The results file could not be read ({error}). Check file permissions and encoding."
+        if not text:
+            return [], None
+        try:
+            records = json.loads(text)
+            if not isinstance(records, list):
+                raise ValueError("results file must contain a JSON list")
+            good = [r for r in records if isinstance(r, dict) and REQUIRED_KEYS <= r.keys()]
+            if len(good) < len(records):
+                return good, (f"{len(records) - len(good)} record(s) in the results file were incomplete "
+                              "and are being ignored.")
+            return good, None
+        except (json.JSONDecodeError, ValueError) as error:
+            backup = path.with_name(f"results.corrupt-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}.json")
+            try:
+                os.replace(path, backup)
+            except OSError as move_error:
+                return [], f"The results file could not be read ({error}); backup failed ({move_error})."
+            return [], (f"The results file could not be read ({error}). "
+                        f"It was moved to {backup.name} and a new, empty file will be used.")
 
 
 def save_results(records, path=None):
@@ -73,9 +91,10 @@ def save_results(records, path=None):
 
 
 def append_result(record, path=None):
-    records, _ = load_results(path)
-    records.append(record)
-    save_results(records, path)
+    with _STORAGE_LOCK:
+        records, _ = load_results(path)
+        records.append(record)
+        save_results(records, path)
 
 
 def clear_results(path=None):
@@ -87,11 +106,15 @@ def load_assumptions(defaults, path=None):
     path = Path(path or assumptions_path())
     try:
         saved = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
+    except (FileNotFoundError, json.JSONDecodeError, OSError, UnicodeError):
         return json.loads(json.dumps(defaults))  # a fresh copy of the defaults
+    if not isinstance(saved, dict):
+        return json.loads(json.dumps(defaults))
     merged = json.loads(json.dumps(defaults))
     for section in ("likelihood", "impact_weight"):
-        merged[section].update(saved.get(section, {}))
+        values = saved.get(section, {})
+        if isinstance(values, dict):
+            merged[section].update(values)
     return merged
 
 

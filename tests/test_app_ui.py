@@ -65,8 +65,13 @@ def test_online_mode_runs_builtin_demo_app_with_locked_address(monkeypatch):
     """Simulates Streamlit Cloud: no separate demo_app.py, and visitors cannot change the address."""
     monkeypatch.setenv("PHONEREALITY_CLOUD", "1")
     monkeypatch.setenv("PHONEREALITY_BUILTIN_PORT", "0")  # any free port, so it never clashes in tests
+    monkeypatch.setenv("BUDGETBENCH_ACCESS_KEY", "test-only-key-0123456789abcdef0123456789")
     at = AppTest.from_file(APP, default_timeout=60)
     at.run()
+    at.text_input[0].set_value("test-only-key-0123456789abcdef0123456789")
+    at.button[0].click()
+    at.run()
+    assert not at.exception, at.exception
     address = at.sidebar.text_input[0]
     assert address.disabled
     assert any("Demo app is running" in s.value for s in at.sidebar.success)

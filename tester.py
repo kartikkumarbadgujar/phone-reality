@@ -18,10 +18,14 @@ You can also run a test from the terminal (handy for reproducing a finding):
 
 import argparse
 import hashlib
+import ipaddress
+import json
+import math
 import random
 import time
 import uuid
 from datetime import datetime
+from urllib.parse import urlsplit
 
 import requests
 
@@ -142,6 +146,31 @@ def validate_config(config):
         raise ValueError(f"Unknown operation '{config['operation']}'")
     if config["profile"] not in PROFILES:
         raise ValueError(f"Unknown profile '{config['profile']}'")
+    base_url = config["base_url"]
+    if not isinstance(base_url, str) or len(base_url) > 2048:
+        raise ValueError("base_url must be a valid local demo URL (maximum 2048 characters).")
+    parsed = None
+    try:
+        parsed = urlsplit(base_url)
+        host = parsed.hostname or ""
+        local_host = host.lower() == "localhost" or ipaddress.ip_address(host).is_loopback
+        _ = parsed.port  # Validate malformed ports before any network request.
+    except ValueError:
+        local_host = False
+    if (parsed is None or parsed.scheme != "http" or not local_host or parsed.username or parsed.password
+            or parsed.path not in ("", "/") or parsed.query or parsed.fragment):
+        raise ValueError("Only an HTTP loopback URL for the local demo server is allowed.")
+    if not isinstance(config["idempotent_server"], bool):
+        raise ValueError("idempotent_server must be true or false.")
+    integer_checks = ("fail_count", "retries", "seed", "upload_size_kb")
+    for key in integer_checks:
+        if isinstance(config[key], bool) or not isinstance(config[key], int):
+            raise ValueError(f"{key} must be an integer.")
+    for key in ("timeout", "server_delay", "loss_rate"):
+        if isinstance(config[key], bool) or not isinstance(config[key], (int, float)):
+            raise ValueError(f"{key} must be a number.")
+        if not math.isfinite(config[key]):
+            raise ValueError(f"{key} must be finite.")
     checks = [
         ("timeout", 0.2, 60), ("server_delay", 0, 30), ("fail_count", 0, 10),
         ("retries", 0, 5), ("loss_rate", 0, 1), ("upload_size_kb", 1, 5120),
@@ -167,6 +196,28 @@ def simulated_drops(config):
         return [False] * attempts
     rng = random.Random(config["seed"])
     return [rng.random() < config["loss_rate"] for _ in range(attempts)]
+
+
+def _http_client():
+    """Use a fresh session without environment proxies for loopback-only requests."""
+    client = requests.Session()
+    client.trust_env = False
+    return client
+
+
+def _read_limited_response(response, limit):
+    """Read only a small response excerpt so a local wrong-target cannot exhaust memory."""
+    chunks = []
+    total = 0
+    for chunk in response.iter_content(chunk_size=1024):
+        if not chunk:
+            continue
+        remaining = limit - total
+        chunks.append(chunk[:remaining])
+        total += min(len(chunk), remaining)
+        if total >= limit:
+            break
+    return b"".join(chunks)
 
 
 def predict_status(config):
@@ -205,10 +256,20 @@ def predict_status(config):
 def check_server(base_url, timeout=3.0):
     """Return (True, message) if the demo app answers /api/health, else (False, help text)."""
     try:
-        response = requests.get(base_url.rstrip("/") + "/api/health", timeout=timeout)
-        if response.ok:
-            return True, f"Demo app is running at {base_url}"
-        return False, f"{base_url} answered HTTP {response.status_code} - is this really the demo app?"
+        with _http_client() as client:
+            with client.get(base_url.rstrip("/") + "/api/health", timeout=timeout,
+                            allow_redirects=False, stream=True,
+                            headers={"Accept": "application/json", "Accept-Encoding": "identity"}) as response:
+                status_code = response.status_code
+                body_bytes = _read_limited_response(response, 4097) if status_code == 200 else b""
+        if status_code == 200 and len(body_bytes) <= 4096:
+            try:
+                body = json.loads(body_bytes.decode("utf-8"))
+            except (ValueError, UnicodeError):
+                body = {}
+            if body.get("service") == "PhoneReality demo app" and body.get("status") == "ok":
+                return True, f"Demo app is running at {base_url}"
+        return False, f"{base_url} is not the expected demo app (HTTP {status_code})."
     except requests.exceptions.ReadTimeout:
         return False, (f"The demo app at {base_url} accepted the connection but did not answer within "
                        f"{timeout} s. The laptop may be busy - wait a moment and try again.")
@@ -233,16 +294,22 @@ def send_request(config, fault_key, upload_id, payload, attempt_number):
     try:
         if config["operation"] == "upload":
             params["idempotent"] = 1 if config["idempotent_server"] else 0
-            response = requests.post(
-                url, params=params, timeout=config["timeout"],
-                files={"file": ("photo.bin", payload, "application/octet-stream")},
-                data={"upload_id": upload_id, "attempt": attempt_number},
-            )
+            with _http_client() as client:
+                with client.post(
+                    url, params=params, timeout=config["timeout"], allow_redirects=False,
+                    stream=True,
+                    files={"file": ("photo.bin", payload, "application/octet-stream")},
+                    data={"upload_id": upload_id, "attempt": attempt_number},
+                ) as response:
+                    attempt["http_status"] = response.status_code
+                    attempt["response_excerpt"] = _read_limited_response(response, 4096).decode("utf-8", "replace")
         else:
-            response = requests.get(url, params=params, timeout=config["timeout"])
-        attempt["http_status"] = response.status_code
-        attempt["response_excerpt"] = response.text[:300]
-        attempt["status"] = SUCCESS if response.ok else HTTP_ERROR
+            with _http_client() as client:
+                with client.get(url, params=params, timeout=config["timeout"], allow_redirects=False,
+                                stream=True) as response:
+                    attempt["http_status"] = response.status_code
+                    attempt["response_excerpt"] = _read_limited_response(response, 4096).decode("utf-8", "replace")
+        attempt["status"] = SUCCESS if 200 <= attempt["http_status"] < 300 else HTTP_ERROR
     except requests.exceptions.ReadTimeout as error:
         # Connected, request sent, but no reply in time: the timeout we are testing for.
         attempt["status"] = TIMEOUT
@@ -254,6 +321,10 @@ def send_request(config, fault_key, upload_id, payload, attempt_number):
         attempt["status"] = CONNECTION_ERROR
         attempt["error_type"] = type(error).__name__
         attempt["error_message"] = str(error)[:300]
+    except requests.exceptions.RequestException as error:
+        attempt["status"] = CONNECTION_ERROR
+        attempt["error_type"] = type(error).__name__
+        attempt["error_message"] = str(error)[:300]
     attempt["elapsed_s"] = round(time.perf_counter() - started, 3)
     return attempt
 
@@ -261,8 +332,15 @@ def send_request(config, fault_key, upload_id, payload, attempt_number):
 def check_upload_on_server(base_url, upload_id):
     """Ask the server what it REALLY saved for this upload_id (independent of the client's view)."""
     try:
-        response = requests.get(f"{base_url.rstrip('/')}/api/uploads/{upload_id}", timeout=5)
-        body = response.json()
+        with _http_client() as client:
+            with client.get(f"{base_url.rstrip('/')}/api/uploads/{upload_id}", timeout=5,
+                            allow_redirects=False, stream=True,
+                            headers={"Accept": "application/json", "Accept-Encoding": "identity"}) as response:
+                status_code = response.status_code
+                body_bytes = _read_limited_response(response, 256 * 1024 + 1) if status_code == 200 else b""
+        if status_code != 200 or len(body_bytes) > 256 * 1024:
+            return {"checked": False, "error": f"Unexpected upload-status response HTTP {status_code} or oversized body."}
+        body = json.loads(body_bytes.decode("utf-8"))
         return {"checked": True, "receipt_count": body["receipt_count"],
                 "server_sha256": [r["sha256"] for r in body["receipts"]],
                 "receipt_ids": [r["receipt_id"] for r in body["receipts"]]}

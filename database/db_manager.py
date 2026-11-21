@@ -9,6 +9,7 @@ import json
 import os
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -23,14 +24,19 @@ def database_path() -> Path:
     return Path(__file__).resolve().parents[1] / "data" / "budgetbench.sqlite3"
 
 
+@contextmanager
 def connect():
     path = database_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(path, timeout=10)
     db.row_factory = sqlite3.Row
-    db.execute("PRAGMA foreign_keys=ON")
-    db.execute("PRAGMA journal_mode=WAL")
-    return db
+    try:
+        db.execute("PRAGMA foreign_keys=ON")
+        db.execute("PRAGMA journal_mode=WAL")
+        with db:
+            yield db
+    finally:
+        db.close()
 
 
 def initialize():
@@ -152,5 +158,9 @@ def load_challenge(key, default=None):
 def counts():
     initialize()
     with connect() as db:
-        return {table: db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                for table in ("projects", "devices", "device_snapshots", "test_sessions")}
+        return {
+            "projects": db.execute("SELECT COUNT(*) FROM projects").fetchone()[0],
+            "devices": db.execute("SELECT COUNT(*) FROM devices").fetchone()[0],
+            "device_snapshots": db.execute("SELECT COUNT(*) FROM device_snapshots").fetchone()[0],
+            "test_sessions": db.execute("SELECT COUNT(*) FROM test_sessions").fetchone()[0],
+        }

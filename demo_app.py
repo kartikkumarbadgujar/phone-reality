@@ -24,22 +24,34 @@ Run it with:   python demo_app.py
 
 import argparse
 import hashlib
+import ipaddress
 import json
+import math
+import os
+import re
 import threading
 import time
 import uuid
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from flask import Flask, jsonify, request
 
 MAX_DELAY_SECONDS = 30
+MAX_FAIL_COUNT = 10
+MAX_ACTIVE_FAULT_KEYS = 1024
+MAX_REQUEST_BYTES = 6 * 1024 * 1024
+MAX_STORED_UPLOADS = 1000
+MAX_STORED_BYTES = 256 * 1024 * 1024
 DEFAULT_PORT = 5050
+UPLOAD_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
 
 def create_app(data_dir):
     """Build the Flask app. data_dir is where uploads and the upload log are saved."""
     app = Flask(__name__)
+    app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
 
     data_dir = Path(data_dir)
     files_dir = data_dir / "server_files"
@@ -53,12 +65,68 @@ def create_app(data_dir):
         if not upload_log_file.exists():
             return []
         try:
-            return json.loads(upload_log_file.read_text(encoding="utf-8") or "[]")
-        except json.JSONDecodeError:
-            return []
+            records = json.loads(upload_log_file.read_text(encoding="utf-8") or "[]")
+        except (json.JSONDecodeError, OSError, UnicodeError) as error:
+            raise RuntimeError("The demo receipt log is unreadable; preserve it and check its permissions.") from error
+        if not isinstance(records, list) or any(
+            not isinstance(record, dict)
+            or not isinstance(record.get("upload_id"), str)
+            or not isinstance(record.get("sha256"), str)
+            or not isinstance(record.get("size_bytes"), int)
+            or not isinstance(record.get("receipt_id"), str)
+            for record in records
+        ):
+            raise RuntimeError("The demo receipt log has an invalid structure; preserve it before repair.")
+        return records
 
     def write_upload_log(records):
-        upload_log_file.write_text(json.dumps(records, indent=2), encoding="utf-8")
+        # A unique temporary file plus replace prevents interrupted writes from corrupting history.
+        temp_path = upload_log_file.with_name(f"{upload_log_file.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temp_path.write_text(json.dumps(records, indent=2), encoding="utf-8")
+            os.replace(temp_path, upload_log_file)
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+    @app.errorhandler(RuntimeError)
+    def receipt_log_error(error):
+        return jsonify(error=str(error)), 500
+
+    @app.before_request
+    def allow_local_client_only():
+        """Keep this unauthenticated demo backend private to local BudgetBench processes."""
+        try:
+            peer = ipaddress.ip_address(request.remote_addr or "")
+            host = urlsplit(f"//{request.host}").hostname or ""
+            host_is_local = host.lower() == "localhost" or ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            return jsonify(error="This demo service accepts loopback connections only."), 403
+        if not peer.is_loopback or not host_is_local:
+            return jsonify(error="This demo service accepts loopback connections only."), 403
+        # The harness uses Python requests and sends no Origin header. Reject browser
+        # form/fetch requests so another site cannot use the local service as a CSRF target.
+        if request.headers.get("Origin") or request.headers.get("Sec-Fetch-Site") == "cross-site":
+            return jsonify(error="Cross-site requests are not allowed."), 403
+
+        if request.path in ("/api/data", "/api/upload"):
+            raw_delay = request.args.get("delay", "0")
+            raw_fail_count = request.args.get("fail_count", "0")
+            try:
+                delay = float(raw_delay)
+                fail_count = int(raw_fail_count)
+            except (TypeError, ValueError):
+                return jsonify(error="Invalid fault-injection settings."), 400
+            if not math.isfinite(delay) or not 0 <= delay <= MAX_DELAY_SECONDS:
+                return jsonify(error=f"delay must be between 0 and {MAX_DELAY_SECONDS} seconds."), 400
+            if not 0 <= fail_count <= MAX_FAIL_COUNT:
+                return jsonify(error=f"fail_count must be between 0 and {MAX_FAIL_COUNT}."), 400
+            if fail_count:
+                fault_key = request.args.get("fault_key", "")
+                if not UPLOAD_ID_RE.fullmatch(fault_key):
+                    return jsonify(error="fault_key must be 1-128 letters, digits, dots, underscores, or hyphens."), 400
+            if request.path == "/api/upload" and request.args.get("idempotent", "0") not in ("0", "1"):
+                return jsonify(error="idempotent must be 0 or 1."), 400
+        return None
 
     def injected_failure():
         """Return an HTTP 503 response if this request should fail, otherwise None."""
@@ -67,8 +135,13 @@ def create_app(data_dir):
             return None
         key = request.args.get("fault_key", "")
         with lock:
+            if key not in fault_counters and len(fault_counters) >= MAX_ACTIVE_FAULT_KEYS:
+                return jsonify(error="Too many active fault-injection scenarios."), 429
             seen_before = fault_counters.get(key, 0)
-            fault_counters[key] = seen_before + 1
+            if seen_before < fail_count:
+                fault_counters[key] = seen_before + 1
+            else:
+                fault_counters.pop(key, None)
         if seen_before < fail_count:
             body = {
                 "error": "Service temporarily unavailable",
@@ -109,7 +182,8 @@ def create_app(data_dir):
 
         file = request.files.get("file")
         upload_id = request.form.get("upload_id", "")
-        if file is None or not upload_id:
+        attempt = request.form.get("attempt", "")
+        if file is None or not UPLOAD_ID_RE.fullmatch(upload_id) or len(attempt) > 20:
             return jsonify(error="Send a 'file' and an 'upload_id'"), 400
 
         content = file.read()
@@ -121,22 +195,32 @@ def create_app(data_dir):
             log = read_upload_log()
             already_saved = [r for r in log if r["upload_id"] == upload_id]
             if idempotent and already_saved:
+                if already_saved[0]["sha256"] != sha256 or already_saved[0]["size_bytes"] != len(content):
+                    return jsonify(error="This upload_id was already used for different file content."), 409
                 stored_now = False
                 receipt = already_saved[0]
             else:
+                stored_bytes = sum(item.get("size_bytes", 0) for item in log)
+                if len(log) >= MAX_STORED_UPLOADS or stored_bytes + len(content) > MAX_STORED_BYTES:
+                    return jsonify(error="Demo upload storage is full; clear demo data before retrying."), 507
                 stored_now = True
                 receipt_id = "R-" + uuid.uuid4().hex[:8]
-                (files_dir / f"{receipt_id}.bin").write_bytes(content)
+                stored_file = files_dir / f"{receipt_id}.bin"
+                stored_file.write_bytes(content)
                 receipt = {
                     "receipt_id": receipt_id,
                     "upload_id": upload_id,
-                    "attempt": request.form.get("attempt", ""),
+                    "attempt": attempt,
                     "size_bytes": len(content),
                     "sha256": sha256,
                     "saved_at": datetime.now().isoformat(timespec="milliseconds"),
                 }
                 log.append(receipt)
-                write_upload_log(log)
+                try:
+                    write_upload_log(log)
+                except OSError:
+                    stored_file.unlink(missing_ok=True)
+                    raise
 
         # Step 2: only now apply the delay. The file is ALREADY saved, but the
         # client does not know that until this reply arrives.
@@ -152,6 +236,8 @@ def create_app(data_dir):
 
     @app.get("/api/uploads/<upload_id>")
     def upload_status(upload_id):
+        if not UPLOAD_ID_RE.fullmatch(upload_id):
+            return jsonify(error="Invalid upload_id."), 400
         with lock:
             receipts = [r for r in read_upload_log() if r["upload_id"] == upload_id]
         return jsonify(upload_id=upload_id, receipt_count=len(receipts), receipts=receipts)

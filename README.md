@@ -49,10 +49,12 @@ The most useful demo is the ambiguous upload: the server saves a file, delays it
 - Set `PHONEREALITY_DATA_DIR` to relocate legacy engine data, or `BUDGETBENCH_DB` to relocate SQLite.
 - Device serial identifiers are used internally to associate snapshots. The UI only shows the serial in the connected-device picker; reports from the legacy engine do not contain device serials.
 - The demo backend is intended for local evaluation, not production deployment.
+- The demo backend accepts loopback clients only, rejects browser-origin requests, caps each request at 6 MiB, and limits stored uploads to 256 MiB / 1,000 receipts.
+- Hosted mode requires `BUDGETBENCH_ACCESS_KEY` in Streamlit secrets (or the deployment environment). Do not publish a hosted instance without configuring this key. It is a shared workspace key, not individual user accounts.
 
 ## Evidence limits
 
-The HTTP harness executes genuine requests against a local demo server. It does not measure Indian mobile networks or claim a physical phone was throttled. The ADB module reads device properties and system diagnostics; it does not automate native app journeys or collect app-specific memory yet. Continuous monitoring, network shaping, memory/storage pressure, native UI automation, Playwright journeys, PDF reports, Neo4j graph writes, user authentication, and multi-user access are not implemented in this build. The corresponding pages state these limits rather than presenting simulated results as real evidence.
+The HTTP harness executes genuine requests against a local demo server. It does not measure Indian mobile networks or claim a physical phone was throttled. The ADB module reads device properties and system diagnostics; it does not automate native app journeys or collect app-specific memory yet. Continuous monitoring, network shaping, memory/storage pressure, native UI automation, Playwright journeys, PDF reports, Neo4j graph writes, individual accounts, and multi-user roles are not implemented in this build. The corresponding pages state these limits rather than presenting simulated results as real evidence.
 
 The challenge tracker stores team-entered plans and interviews locally. It does not claim customer validation or a security scan unless the team records evidence.
 
