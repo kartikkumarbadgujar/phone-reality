@@ -13,7 +13,6 @@ This file only draws the screens. The real work happens in:
 """
 
 import os
-import hmac
 import ipaddress
 from datetime import datetime
 from pathlib import Path
@@ -89,38 +88,6 @@ NAV_LABELS = {
 # switches the same mode on anywhere else.
 ONLINE_MODE = (Path(__file__).resolve().as_posix().startswith("/mount/src/")
                or os.environ.get("PHONEREALITY_CLOUD") == "1")
-
-
-def require_hosted_access():
-    """Protect shared/public hosting with a configured key; local loopback remains frictionless."""
-    if not ONLINE_MODE:
-        return
-    access_key = os.environ.get("BUDGETBENCH_ACCESS_KEY")
-    if not access_key:
-        try:
-            access_key = st.secrets.get("BUDGETBENCH_ACCESS_KEY")
-        except Exception:
-            access_key = None
-    if not access_key:
-        st.error("Hosted access is locked because no access key is configured.")
-        st.info("Add `BUDGETBENCH_ACCESS_KEY` to the app's Streamlit secrets before sharing this hosted workspace.")
-        st.stop()
-    if len(str(access_key)) < 32:
-        st.error("Hosted access is locked because the configured key is too short.")
-        st.info("Set `BUDGETBENCH_ACCESS_KEY` to at least 32 characters in Streamlit secrets.")
-        st.stop()
-    if st.session_state.get("hosted_authenticated"):
-        return
-    page_header("Private workspace", "Enter the workspace access key configured by the app owner.", "BUDGETBENCH ACCESS")
-    with st.form("hosted_access"):
-        candidate = st.text_input("Access key", type="password", autocomplete="current-password")
-        submitted = st.form_submit_button("Unlock workspace", type="primary", use_container_width=True)
-    if submitted:
-        if hmac.compare_digest(str(candidate), str(access_key)):
-            st.session_state["hosted_authenticated"] = True
-            st.rerun()
-        st.error("That access key did not match. Try again.")
-    st.stop()
 
 
 @st.cache_resource
@@ -805,7 +772,6 @@ def page_settings():
 
 # ---------------------------------------------------------------- layout
 
-require_hosted_access()
 db_manager.initialize()
 style_path = Path(__file__).parent / "assets" / "style.css"
 if style_path.exists():

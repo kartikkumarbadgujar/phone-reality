@@ -50,7 +50,7 @@ The most useful demo is the ambiguous upload: the server saves a file, delays it
 - Device serial identifiers are used internally to associate snapshots. The UI only shows the serial in the connected-device picker; reports from the legacy engine do not contain device serials.
 - The demo backend is intended for local evaluation, not production deployment.
 - The demo backend accepts loopback clients only, rejects browser-origin requests, caps each request at 6 MiB, and limits stored uploads to 256 MiB / 1,000 receipts.
-- Hosted mode requires `BUDGETBENCH_ACCESS_KEY` in Streamlit secrets (or the deployment environment). Do not publish a hosted instance without configuring this key. It is a shared workspace key, not individual user accounts.
+- Hosted mode has no login: anyone with the app URL can open it and see or change its projects and runs.
 
 ## Evidence limits
 
