@@ -109,7 +109,7 @@ def findings_csv(findings):
 
 def full_json(records, findings, assumptions):
     report = {
-        "tool": "PhoneReality",
+        "tool": "BudgetBench",
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "disclaimer": DISCLAIMER,
         "test_count": len(records),
@@ -123,7 +123,7 @@ def full_json(records, findings, assumptions):
 
 def findings_markdown(findings, assumptions):
     lines = [
-        "# PhoneReality findings report",
+        "# BudgetBench findings report",
         "",
         f"Generated: {datetime.now():%Y-%m-%d %H:%M}",
         "",

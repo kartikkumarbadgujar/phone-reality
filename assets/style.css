@@ -1,0 +1,15 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+:root { --bb-accent:#8b5cf6; --bb-border:rgba(148,163,184,.18); }
+.stApp { background: radial-gradient(ellipse at 75% -15%, rgba(124,58,237,.14), transparent 36%), #0b1020; }
+[data-testid="stSidebar"] { background:#0d1426; border-right:1px solid var(--bb-border); }
+[data-testid="stSidebar"] > div { padding-top:1rem; }
+h1,h2,h3 { font-family:'Space Grotesk',sans-serif !important; letter-spacing:-.035em; }
+p, label, [data-testid="stMetricValue"] { font-family:'DM Sans',sans-serif; }
+[data-testid="stMetric"] { background:linear-gradient(145deg,rgba(20,29,51,.96),rgba(15,22,40,.96)); border:1px solid var(--bb-border); padding:1rem 1.1rem; border-radius:14px; }
+[data-testid="stMetricLabel"] { color:#aab5ca; }
+[data-testid="stMetricValue"] { color:#f3f4f6; }
+[data-testid="stVerticalBlockBorderWrapper"] { border-color:var(--bb-border) !important; border-radius:14px; }
+button[kind="primary"] { background:linear-gradient(100deg,#7c3aed,#a855f7); border:0; }
+.bb-kicker { color:#a78bfa; text-transform:uppercase; font-size:.76rem; letter-spacing:.16em; font-weight:700; }
+.bb-subtitle { color:#a6b0c3; max-width:760px; font-size:1.04rem; }
+@media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto !important; animation:none !important; } }
