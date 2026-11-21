@@ -118,6 +118,17 @@ def go_to_reproduce(finding_id):
     st.session_state["repro_finding"] = finding_id
 
 
+def navigate_to(page):
+    """Radio navigation changes must run as callbacks before the radio is rendered."""
+    st.session_state["page"] = page
+
+
+def navigate_to_profile(profile):
+    """Remember the chosen profile, then switch pages in the pre-render callback."""
+    st.session_state["requested_profile"] = profile
+    st.session_state["page"] = "Run Tests"
+
+
 def page_header(title, description, eyebrow="BUDGETBENCH"):
     """Give each workspace page the same clear title and short orientation."""
     st.markdown(
@@ -210,12 +221,10 @@ def page_dashboard(records, findings):
         'Capture evidence, understand impact, and reproduce the behavior.</p>'
         '</div></section>', unsafe_allow_html=True)
     action_left, action_right = st.columns([1, 1])
-    if action_left.button("▶   Start a test", type="primary", use_container_width=True, key="dashboard_start_test"):
-        st.session_state["page"] = "Run Tests"
-        st.rerun()
-    if action_right.button("＋   Create a project", use_container_width=True, key="dashboard_create_project"):
-        st.session_state["page"] = "Projects"
-        st.rerun()
+    action_left.button("▶   Start a test", type="primary", use_container_width=True,
+                       key="dashboard_start_test", on_click=navigate_to, args=("Run Tests",))
+    action_right.button("＋   Create a project", use_container_width=True,
+                        key="dashboard_create_project", on_click=navigate_to, args=("Projects",))
     st.markdown('<div class="bb-section-heading"><h3>Workspace at a glance</h3></div>', unsafe_allow_html=True)
     db_counts = db_manager.counts()
     request_attempts = sum(len(record.get("attempts", [])) for record in records)
@@ -665,10 +674,9 @@ def page_test_environment():
     st.json(profile["defaults"])
     if key == "packet_loss":
         st.warning("Packet loss is a deterministic software simulation; it does not shape the phone or network.")
-    if key in ("normal", "slow_network", "intermittent", "packet_loss") and st.button("Configure this profile in Run Tests", type="primary"):
-        st.session_state["page"] = "Run Tests"
-        st.session_state["requested_profile"] = key
-        st.rerun()
+    if key in ("normal", "slow_network", "intermittent", "packet_loss"):
+        st.button("Configure this profile in Run Tests", type="primary",
+                  on_click=navigate_to_profile, args=(key,))
     st.subheader("Not available in this build")
     st.write("Real network shaping, low-storage/memory pressure, native app journeys, process interruption and thermal throttling require additional device or emulator instrumentation. No controls claim these actions have been performed.")
 
@@ -701,8 +709,7 @@ def page_failure_analysis(records, findings):
 def page_live_monitoring():
     page_header("Live monitoring", "Inspect device snapshots during a test; continuous sampling is not available in this build.", "DEVICE TESTING")
     st.info("This build provides on-demand device snapshots in Device Lab. Continuous sampling has not been implemented, so no live metrics are presented as if collected.")
-    if st.button("Open Device Lab"):
-        st.session_state["page"] = "Device Lab"; st.rerun()
+    st.button("Open Device Lab", on_click=navigate_to, args=("Device Lab",))
 
 
 def page_challenge():
