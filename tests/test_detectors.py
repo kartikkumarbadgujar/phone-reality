@@ -1,4 +1,4 @@
-"""Unit tests for the detector rules and finding creation (no network needed)."""
+"""Check detector rules and finding summaries without starting a server."""
 
 import detectors
 import scoring
@@ -7,7 +7,7 @@ import tester
 
 def make_record(operation="load_data", profile="normal", status="SUCCESS", receipts=None,
                 test_id="T-1", sha_match=True, **config_changes):
-    """Build a hand-made test record in the same shape tester.run_test() produces."""
+    """Make a small run record with the same fields the test runner saves."""
     config = tester.build_config(operation, profile, **config_changes)
     evidence = {"attempts_made": config["retries"] + 1, "simulated_drops": 0,
                 "final_http_status": 503 if status == "HTTP_ERROR" else 200}
@@ -51,7 +51,7 @@ def test_http_error_is_detected():
 
 
 def test_failed_retries_trigger_recovery_failure():
-    record = make_record(profile="intermittent", status="HTTP_ERROR")  # profile default retries = 1
+    record = make_record(profile="intermittent", status="HTTP_ERROR")  # This profile retries once by default.
     assert codes(record) == ["HTTP_FAILURE", "RECOVERY_FAILURE"]
 
 
@@ -100,7 +100,7 @@ def test_repeated_failures_group_into_one_finding_with_original_config():
     finding = findings[0]
     assert finding["occurrences"] == 2
     assert finding["original_test_id"] == "T-1"
-    assert finding["original_config"]["server_delay"] == 3.0  # T7: original parameters retained
+    assert finding["original_config"]["server_delay"] == 3.0  # Keep the first run's settings for replay.
     assert finding["test_ids"] == ["T-1", "T-2"]
 
 
@@ -116,7 +116,7 @@ def test_findings_sorted_by_priority():
 def test_reproduction_command_parses_back_to_same_config():
     config = tester.build_config("upload", "slow_network", retries=1, idempotent_server=True, seed=7)
     command = detectors.reproduction_command(config)
-    args = tester.make_parser().parse_args(command.split()[2:])  # drop "python tester.py"
+    args = tester.make_parser().parse_args(command.split()[2:])  # Pass only the arguments after the script name.
     assert tester.config_from_args(args) == config
 
 

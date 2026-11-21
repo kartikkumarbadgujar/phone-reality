@@ -1,13 +1,12 @@
-"""
-storage.py - saves and loads PhoneReality's own files (test results and scoring assumptions).
+"""Read and write the JSON files used by the original test engine.
 
-Everything is plain JSON so you can open the files in VS Code and read them.
-If the results file is missing or empty we treat it as "no tests yet".
-If it is broken (not valid JSON) we move it aside as a backup and start fresh,
-and we tell the user, instead of crashing.
+Run records stay as plain JSON so they remain easy to inspect and compatible
+with older PhoneReality data. Missing or empty files mean there are no saved
+runs. If a file is damaged, keep a timestamped copy and show the user what
+happened instead of crashing the app.
 
-Set the environment variable PHONEREALITY_DATA_DIR to use a different folder
-(the automated tests do this so they never touch your real results).
+Set ``PHONEREALITY_DATA_DIR`` to keep these files somewhere else. The test
+suite points it at a temporary folder so it never touches local run history.
 """
 
 import json
@@ -17,14 +16,14 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-# Every saved test record must have these fields; anything else is ignored with a warning.
+# Records missing any of these fields are skipped and reported to the user.
 REQUIRED_KEYS = {
     "test_id", "timestamp", "profile", "profile_label", "operation", "operation_label", "config",
     "evidence_category", "expected_status", "operation_status", "verdict", "duration_s",
     "attempts", "evidence", "actual_outcome", "detections",
 }
 
-# Streamlit can service multiple sessions in one process; serialize read/modify/write operations.
+# Keep read-and-update operations together when several Streamlit sessions write at once.
 _STORAGE_LOCK = threading.RLock()
 
 
@@ -43,7 +42,7 @@ def assumptions_path():
 
 
 def _write_json(path, value):
-    """Write to a temporary file first, then swap it in, so a crash cannot leave half a file."""
+    """Write a complete temporary file before replacing the saved one."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
@@ -56,7 +55,7 @@ def _write_json(path, value):
 
 
 def load_results(path=None):
-    """Return (records, warning). warning is None when everything is fine."""
+    """Load valid run records and return any warning that should be shown."""
     path = Path(path or results_path())
     with _STORAGE_LOCK:
         if not path.exists():
@@ -102,12 +101,12 @@ def clear_results(path=None):
 
 
 def load_assumptions(defaults, path=None):
-    """Return the saved scoring assumptions, falling back to the defaults."""
+    """Load the saved weights, or make a fresh copy of the defaults."""
     path = Path(path or assumptions_path())
     try:
         saved = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError, UnicodeError):
-        return json.loads(json.dumps(defaults))  # a fresh copy of the defaults
+        return json.loads(json.dumps(defaults))  # Avoid sharing the caller's nested dictionaries.
     if not isinstance(saved, dict):
         return json.loads(json.dumps(defaults))
     merged = json.loads(json.dumps(defaults))

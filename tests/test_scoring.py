@@ -1,4 +1,4 @@
-"""Unit tests for the priority formula."""
+"""Check the priority formula and how it uses team-set weights."""
 
 import pytest
 
@@ -13,7 +13,7 @@ def test_formula_maximum():
 
 
 def test_formula_example():
-    result = scoring.calculate_priority(4, 4, 5)  # ambiguous upload on slow network
+    result = scoring.calculate_priority(4, 4, 5)  # Example weights for a slow-network upload finding.
     assert result["raw"] == 80
     assert result["percent"] == 64.0
     assert result["formula"] == "4 x 4 x 5 = 80 / 125 = 64.0% (High)"

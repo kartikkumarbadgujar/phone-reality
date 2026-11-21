@@ -1,15 +1,15 @@
-"""
-app.py - the BudgetBench dashboard (Streamlit).
+"""Streamlit pages for BudgetBench.
 
-Start it with:      streamlit run app.py
-The demo app must be running in ANOTHER terminal for tests to run:   python demo_app.py
+Run the interface with ``streamlit run app.py``. For local use, start the
+demo service in a second terminal with ``python demo_app.py``. The service
+handles test requests; the modules below keep the work separate and easier to
+follow:
 
-This file only draws the screens. The real work happens in:
-  tester.py            - sends the real HTTP requests
-  detectors.py         - decides what counts as a failure
-  scoring.py           - priority score
-  report_generator.py  - downloads
-  storage.py           - reading/writing data/results.json
+* ``tester`` sends requests and records what happened.
+* ``detectors`` checks each run against the written rules.
+* ``scoring`` turns the finding and team-set weights into a priority.
+* ``storage`` and ``db_manager`` save results and workspace data.
+* ``report_generator`` prepares the downloadable reports.
 """
 
 import os
@@ -36,8 +36,7 @@ PAGES = ["Dashboard", "Projects", "Device Lab", "Test Environment", "Run Tests",
          "Live Monitoring", "Condition Matrix", "Failure Analysis", "Findings", "Reproduce",
          "Test History", "Reports", "Neo4j Graph Explorer", "Challenge Readiness Centre", "Settings"]
 
-# Streamlit "badge" markdown, e.g. :green-badge[PASS]. Every badge has a text label,
-# so meaning never depends on colour alone.
+# Streamlit badges always include a word, so the result stays clear without colour.
 CATEGORY_BADGES = {
     "GENUINE": ":green-badge[GENUINE MEASUREMENT]",
     "FAULT_INJECTION": ":blue-badge[CONTROLLED FAULT INJECTION]",
@@ -59,7 +58,7 @@ VERDICT_BADGES = {
 }
 BAND_BADGES = {"High": ":red-badge[High priority]", "Medium": ":orange-badge[Medium priority]",
                "Low": ":gray-badge[Low priority]"}
-# Chart colours for operation statuses (status palette: good / warning / critical / neutral)
+# Keep chart colours consistent with the status badges above.
 STATUS_COLORS = {"SUCCESS": "#0ca30c", "TIMEOUT": "#fab219", "HTTP_ERROR": "#d03b3b",
                  "LOST_SIMULATED": "#8a8a8a"}
 
@@ -82,17 +81,15 @@ NAV_LABELS = {
 }
 
 
-# ONLINE MODE. Streamlit Community Cloud runs only this one program, so there is no second terminal
-# for demo_app.py. Online, we start the demo app inside this program instead (see
-# demo_app.start_in_background). Streamlit Cloud keeps apps under /mount/src/; PHONEREALITY_CLOUD=1
-# switches the same mode on anywhere else.
+# Community Cloud runs only ``app.py``, so start the demo service in this
+# process there. ``PHONEREALITY_CLOUD=1`` lets us exercise that setup locally.
 ONLINE_MODE = (Path(__file__).resolve().as_posix().startswith("/mount/src/")
                or os.environ.get("PHONEREALITY_CLOUD") == "1")
 
 
 @st.cache_resource
 def start_builtin_demo_app():
-    """Start the demo app once per server (not once per visitor) and return its address."""
+    """Start one demo service for this Streamlit server and return its local URL."""
     port = int(os.environ.get("PHONEREALITY_BUILTIN_PORT", demo_app.DEFAULT_PORT))
     _, base_url = demo_app.start_in_background(storage.data_dir(), port=port)
     return base_url
@@ -104,7 +101,7 @@ def badge(table, key):
 
 def load_everything():
     records, warning = storage.load_results()
-    # Index legacy JSON sessions at startup so old PhoneReality history appears in BudgetBench analytics.
+    # Older runs live in JSON. Index them so they appear alongside newer workspace data.
     for record in records:
         db_manager.index_run(record)
     assumptions = storage.load_assumptions(scoring.DEFAULT_ASSUMPTIONS)
@@ -113,24 +110,24 @@ def load_everything():
 
 
 def go_to_reproduce(finding_id):
-    """Button callback: jump to the Reproduce page with this finding selected."""
+    """Open Reproduce with this finding already selected."""
     st.session_state["page"] = "Reproduce"
     st.session_state["repro_finding"] = finding_id
 
 
 def navigate_to(page):
-    """Radio navigation changes must run as callbacks before the radio is rendered."""
+    """Change the navigation before Streamlit renders the radio again."""
     st.session_state["page"] = page
 
 
 def navigate_to_profile(profile):
-    """Remember the chosen profile, then switch pages in the pre-render callback."""
+    """Remember this profile and open the test page."""
     st.session_state["requested_profile"] = profile
     st.session_state["page"] = "Run Tests"
 
 
 def page_header(title, description, eyebrow="BUDGETBENCH"):
-    """Give each workspace page the same clear title and short orientation."""
+    """Show the same title-and-introduction layout on each page."""
     st.markdown(
         f'<div class="bb-page-head"><div class="bb-kicker">{eyebrow}</div>'
         f'<h1>{title}</h1><p class="bb-subtitle">{description}</p></div>',
@@ -138,10 +135,10 @@ def page_header(title, description, eyebrow="BUDGETBENCH"):
     )
 
 
-# ---------------------------------------------------------------- shared pieces
+# Shared page components
 
 def show_record(record):
-    """Show one test result: expected vs actual, verdict, detections and raw evidence."""
+    """Lay out one run's result, detections and supporting evidence."""
     with st.container(border=True):
         st.markdown(f"**{record['test_id']}** · {record['profile_label']} · {record['operation_label']} "
                     f"· {badge(CATEGORY_BADGES, record['evidence_category'])}")
@@ -154,8 +151,8 @@ def show_record(record):
         st.caption(f"Why we expected {record['expected_status']}: {record['expected_outcome']}")
 
         if record["verdict"] == "ERROR":
-            st.error("The demo app could not be reached, so this run was NOT saved. "
-                     "This is a setup problem, not a finding about the app.")
+            st.error("We could not reach the demo service, so this run was not saved. "
+                     "Check the service setup before treating this as an app finding.")
         elif record["detections"]:
             for d in record["detections"]:
                 st.warning(f"**Finding {d['finding_id']} — {d['title']}** (severity {d['severity']}/5)  \n"
@@ -210,7 +207,7 @@ def show_finding(finding):
         st.caption("Seen in tests: " + ", ".join(finding["test_ids"]))
 
 
-# ---------------------------------------------------------------- pages
+# Page content
 
 def page_dashboard(records, findings):
     st.markdown(
@@ -270,7 +267,7 @@ def page_dashboard(records, findings):
                           for r in records])
     counts = table.groupby(["Profile", "Status"]).size().unstack(fill_value=0)
     statuses = [s for s in STATUS_COLORS if s in counts.columns]
-    # In a horizontal bar chart Streamlit puts x_label on the category axis and y_label on the value axis.
+    # Streamlit uses these axis names in the opposite order for horizontal bars.
     st.bar_chart(counts[statuses], color=[STATUS_COLORS[s] for s in statuses], horizontal=True,
                  x_label="", y_label="Number of tests", height=90 + 45 * len(counts))
 
@@ -339,7 +336,7 @@ def page_run_tests(base_url):
         st.markdown(f"{badge(CATEGORY_BADGES, info['evidence_category'])} {info['description']}")
 
     defaults = tester.build_config(operation, profile, base_url)
-    key = f"{operation}_{profile}"  # new widget keys per combination, so defaults reload when you switch
+    key = f"{operation}_{profile}"  # Separate keys let each operation/profile keep its own settings.
     is_upload = operation == "upload"
 
     st.markdown('<div class="bb-section-heading"><h3>2. Set the conditions</h3></div>', unsafe_allow_html=True)
@@ -766,14 +763,14 @@ def page_settings():
     st.write("Device Lab only reads information from ADB. HTTP tests are restricted to the configured local demo server.")
 
 
-# ---------------------------------------------------------------- layout
+# Build the selected page
 
 db_manager.initialize()
 style_path = Path(__file__).parent / "assets" / "style.css"
 if style_path.exists():
     st.markdown(f"<style>{style_path.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
 
-# Allow direct links such as http://localhost:8501/?page=Findings
+# A ``?page=...`` link opens the requested page on the first visit.
 if "page" not in st.session_state and st.query_params.get("page") in PAGES:
     st.session_state["page"] = st.query_params["page"]
 
@@ -798,8 +795,8 @@ with st.sidebar:
     st.divider()
     st.markdown('<div class="bb-nav-label">Demo target</div>', unsafe_allow_html=True)
     if ONLINE_MODE:
-        # Locked: on a public website, a free-text address would let anyone make our server
-        # send requests to any address on the internet.
+        # Keep the target fixed online; a user-supplied URL could make the server
+        # send requests to services that were never meant to be public.
         base_url = start_builtin_demo_app()
         st.text_input("Demo app address", value=base_url, disabled=True)
         st.caption("**Hosted demo.** Tests still send real HTTP requests to the demo service. Everyone using this link shares the same workspace, and saved data may be cleared when the service restarts.")

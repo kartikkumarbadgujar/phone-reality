@@ -1,37 +1,27 @@
-"""
-scoring.py - turns a finding into a priority score you can explain to anyone.
+"""Keep finding priorities simple enough for the team to explain.
 
-    Priority (raw) = Severity x Likelihood x Impact weight     (each 1-5, so max 125)
-    Priority (%)   = raw / 125 x 100
-
-Where the three numbers come from:
-  Severity      - fixed per detector type (see detectors.py). How bad is it when it happens?
-  Likelihood    - how often we ASSUME users are in that condition (per profile).
-  Impact weight - how important we ASSUME that operation is to the user (per operation).
-
-IMPORTANT: Likelihood and impact weight are TEAM ASSUMPTIONS, not measurements.
-Our local tests cannot tell us how many Indian phone users are on slow networks.
-That is why they are editable in the dashboard and saved in data/assumptions.json.
+The score is severity x likelihood x impact. Severity comes from the detector;
+the team can change the likelihood and impact weights. Those two values are
+assumptions, not measurements from our local tests or a user survey.
 """
 
 MAX_RAW_SCORE = 125
 
 ASSUMPTION_SOURCE = (
-    "PhoneReality team assumption for this prototype - NOT measured and NOT taken "
-    "from any survey. Replace with real data (for example your app's own analytics) "
-    "before relying on the ranking."
+    "BudgetBench team estimate for this prototype. It is not measured and does not come from a survey. "
+    "Replace these weights with evidence from your own app before relying on the ranking."
 )
 
 DEFAULT_ASSUMPTIONS = {
     "likelihood": {
-        "normal": 5,          # everyone is sometimes on a good connection
-        "slow_network": 4,    # assumed common for budget phones on mobile data
-        "intermittent": 3,    # assumed: drops happen, but less often than slowness
-        "packet_loss": 3,     # assumed: same as intermittent
+        "normal": 5,          # A good connection is common enough to use as our baseline.
+        "slow_network": 4,    # Our starting estimate for people using mobile data on budget phones.
+        "intermittent": 3,    # An estimate for occasional connection drops.
+        "packet_loss": 3,     # Kept near the intermittent profile until we have better data.
     },
     "impact_weight": {
-        "load_data": 3,       # user can usually pull-to-refresh
-        "upload": 5,          # user's own data / action (form, photo, payment-like)
+        "load_data": 3,       # A user can often refresh and try again.
+        "upload": 5,          # An upload may contain a form, photo or other user work.
     },
     "source": ASSUMPTION_SOURCE,
 }
@@ -46,7 +36,7 @@ def priority_band(percent):
 
 
 def calculate_priority(severity, likelihood, impact_weight):
-    """Return a dict with the raw score, the percentage, the band and a written explanation."""
+    """Return the score and its parts so the ranking is easy to check."""
     for name, value in (("severity", severity), ("likelihood", likelihood),
                         ("impact_weight", impact_weight)):
         if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 5:
@@ -67,7 +57,7 @@ def calculate_priority(severity, likelihood, impact_weight):
 
 
 def score_finding(severity, profile, operation, assumptions):
-    """Score one finding using the (possibly user-edited) assumptions and explain each factor."""
+    """Score a finding with the current team weights and explain each factor."""
     likelihood = int(assumptions["likelihood"][profile])
     impact = int(assumptions["impact_weight"][operation])
     result = calculate_priority(severity, likelihood, impact)

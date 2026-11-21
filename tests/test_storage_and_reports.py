@@ -1,4 +1,4 @@
-"""Results file handling (missing / empty / broken) and the JSON + CSV exports."""
+"""Check result-file recovery and the reports made from saved runs."""
 
 import csv
 import io
@@ -54,7 +54,7 @@ def test_assumptions_fall_back_to_defaults_and_save():
     changed["likelihood"]["slow_network"] = 2
     storage.save_assumptions(changed)
     assert storage.load_assumptions(scoring.DEFAULT_ASSUMPTIONS)["likelihood"]["slow_network"] == 2
-    assert scoring.DEFAULT_ASSUMPTIONS["likelihood"]["slow_network"] == 4  # defaults untouched
+    assert scoring.DEFAULT_ASSUMPTIONS["likelihood"]["slow_network"] == 4  # Saving edits must not change the defaults.
 
 
 def test_csv_export_contains_actual_results():

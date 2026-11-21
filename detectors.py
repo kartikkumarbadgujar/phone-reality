@@ -1,16 +1,9 @@
-"""
-detectors.py - decides, with simple fixed rules, whether a test record shows a failure.
+"""Turn each saved run into a small set of explainable findings.
 
-There is no AI and no guessing here. Every detector is one "if" statement you can read
-in detect() below. The same record always produces the same detections.
-
-Two steps:
-  detect(record)            -> list of detections for ONE test (called by tester.py)
-  build_findings(records)   -> groups detections from ALL tests into findings,
-                               adds evidence, reproduction steps and a priority score.
-
-A finding is identified by (detector, operation, profile, evidence category). If you run
-the same failing test five times you get ONE finding seen five times, not five findings.
+The checks are ordinary Python conditions in ``detect``. Given the same run,
+they always return the same detections. ``build_findings`` groups repeat
+detections from the same operation and profile, then adds the evidence, replay
+steps and priority score a developer needs to investigate them.
 """
 
 import hashlib
@@ -101,13 +94,13 @@ CONFIDENCE = {
 
 
 def finding_id(code, operation, profile, category):
-    """A short, stable ID: the same failure type in the same situation always gets the same ID."""
+    """Give the same kind of failure the same short ID each time."""
     text = f"{code}|{operation}|{profile}|{category}"
     return "F-" + hashlib.sha1(text.encode()).hexdigest()[:6].upper()
 
 
 def detect(record):
-    """Apply every detector rule to one test record. Returns a list of detections."""
+    """Check one run against each rule and return the ones that match."""
     status = record["operation_status"]
     config = record["config"]
     evidence = record.get("evidence", {})
@@ -133,13 +126,14 @@ def detect(record):
     if is_upload and check.get("checked"):
         receipts = check["receipt_count"]
         if not got_success and receipts >= 1:
-            hits.append(("AMBIGUOUS_UPLOAD", f"Client saw {status}, but the server had saved "
-                                             f"{receipts} copy(ies) of upload {evidence['upload_id']}."))
+            copies = "copy" if receipts == 1 else "copies"
+            hits.append(("AMBIGUOUS_UPLOAD", f"The client reported {status}, but the server saved "
+                                             f"{receipts} {copies} of upload {evidence['upload_id']}."))
         if receipts > 1:
-            hits.append(("DUPLICATE_UPLOAD", f"Server saved {receipts} copies of one upload "
-                                             f"(receipts {', '.join(check['receipt_ids'])})."))
+            hits.append(("DUPLICATE_UPLOAD", f"The server saved {receipts} copies of one upload "
+                                             f"(receipts: {', '.join(check['receipt_ids'])})."))
         if not got_success and receipts == 0:
-            hits.append(("UPLOAD_NOT_SAVED", f"Client saw {status} and the server has no copy."))
+            hits.append(("UPLOAD_NOT_SAVED", f"The client reported {status}, and the server has no saved copy."))
         if got_success and (receipts == 0 or any(h != evidence["client_sha256"] for h in check["server_sha256"])):
             hits.append(("UPLOAD_INTEGRITY", "Server copy missing or its SHA-256 differs from the client's."))
 
@@ -157,10 +151,10 @@ def detect(record):
     return detections
 
 
-# ---------------------------------------------------------------- reproduction
+# Reproducing a finding
 
 def reproduction_command(config):
-    """The exact terminal command that re-runs this test with the same settings."""
+    """Build a terminal command that uses the run's saved settings."""
     parts = ["python tester.py",
              f"--operation {config['operation']}", f"--profile {config['profile']}",
              f"--timeout {config['timeout']}", f"--delay {config['server_delay']}",
@@ -175,9 +169,9 @@ def reproduction_command(config):
 
 
 def curl_commands(config):
-    """Commands that reproduce the failure WITHOUT PhoneReality (one attempt only).
+    """Build one-attempt curl commands when the condition can be reproduced outside BudgetBench.
 
-    Returns None for simulated packet loss: that condition only exists inside PhoneReality.
+    Simulated packet loss has no curl equivalent, so return ``None`` for that case.
     """
     if config["loss_rate"] > 0:
         return None
@@ -205,17 +199,17 @@ def reproduction_steps(record):
         + (f", upload size {config['upload_size_kb']} KB, server de-duplication "
            f"{'ON' if config['idempotent_server'] else 'OFF'}" if config["operation"] == "upload" else "")
         + ".",
-        "Click 'Run test' (or press 'Re-run original configuration' on the Reproduce page).",
-        f"Expected operation status: {record['expected_status']}. "
-        f"The finding is reproduced if the same detector fires again.",
+        "Choose 'Run test', or select 'Re-run original configuration' on the Reproduce page.",
+        f"We expect the operation to end with {record['expected_status']}. "
+        "The issue is reproduced if the same detector fires again.",
     ]
     return steps
 
 
-# ---------------------------------------------------------------- findings
+# Building findings from saved runs
 
 def build_findings(records, assumptions):
-    """Group all detections into findings, newest evidence first, sorted by priority."""
+    """Group repeat detections, keep the latest evidence and sort by priority."""
     groups = {}
     for record in records:
         for detection in record.get("detections", []):

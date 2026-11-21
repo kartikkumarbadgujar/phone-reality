@@ -1,25 +1,13 @@
-"""
-demo_app.py - the small "app backend" that PhoneReality tests.
+"""Local HTTP service used by BudgetBench's test lab.
 
-Think of this as the server behind a simple mobile app. It has three features:
-  GET  /api/health              -> "is the server alive?" (never has faults)
-  GET  /api/data                -> loads the data for a screen (a list of items)
-  POST /api/upload              -> uploads a file (like a photo or a form)
-  GET  /api/uploads/<upload_id> -> lets the tester check what the server REALLY saved
+It stands in for a simple app backend: return screen data, accept a file and
+show which uploads were saved. Tests can ask it to delay a reply or return a
+few HTTP 503 responses. For uploads, the file is saved before the optional
+delay. That lets us reproduce the case where the client times out but the
+server has already finished the work.
 
-The tester can switch on CONTROLLED FAULTS using query parameters:
-  delay=3          wait 3 seconds before replying.
-                   For uploads the wait happens AFTER the file is saved
-                   (a "delayed acknowledgement").
-  fail_count=2     the first 2 requests with the same fault_key get HTTP 503.
-  fault_key=abc    any text; groups the requests that belong to one test.
-  idempotent=1     (upload only) the FIXED behaviour: if the same upload_id
-                   arrives twice, store it only once.
-
-Nothing here touches the real network. These are deliberate faults inside the
-app, so the client sees a genuine HTTP outcome (real timeout, real 503).
-
-Run it with:   python demo_app.py
+These are controlled faults in this service; they do not change a phone's
+network. Start it with ``python demo_app.py``.
 """
 
 import argparse
@@ -49,7 +37,7 @@ UPLOAD_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
 
 def create_app(data_dir):
-    """Build the Flask app. data_dir is where uploads and the upload log are saved."""
+    """Create the service and keep its uploads under ``data_dir``."""
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
 
@@ -58,8 +46,8 @@ def create_app(data_dir):
     files_dir.mkdir(parents=True, exist_ok=True)
     upload_log_file = data_dir / "server_uploads.json"
 
-    lock = threading.Lock()   # stops two requests from writing the log at the same time
-    fault_counters = {}       # fault_key -> how many requests we have seen for it
+    lock = threading.Lock()  # Only one request at a time may update the receipt log.
+    fault_counters = {}  # Number of attempts seen for each fault key.
 
     def read_upload_log():
         if not upload_log_file.exists():
@@ -80,7 +68,7 @@ def create_app(data_dir):
         return records
 
     def write_upload_log(records):
-        # A unique temporary file plus replace prevents interrupted writes from corrupting history.
+        # Write beside the log, then replace it so a partial write cannot break saved history.
         temp_path = upload_log_file.with_name(f"{upload_log_file.name}.{uuid.uuid4().hex}.tmp")
         try:
             temp_path.write_text(json.dumps(records, indent=2), encoding="utf-8")
@@ -94,7 +82,7 @@ def create_app(data_dir):
 
     @app.before_request
     def allow_local_client_only():
-        """Keep this unauthenticated demo backend private to local BudgetBench processes."""
+        """Only accept loopback traffic and requests sent directly by the test harness."""
         try:
             peer = ipaddress.ip_address(request.remote_addr or "")
             host = urlsplit(f"//{request.host}").hostname or ""
@@ -103,8 +91,8 @@ def create_app(data_dir):
             return jsonify(error="This demo service accepts loopback connections only."), 403
         if not peer.is_loopback or not host_is_local:
             return jsonify(error="This demo service accepts loopback connections only."), 403
-        # The harness uses Python requests and sends no Origin header. Reject browser
-        # form/fetch requests so another site cannot use the local service as a CSRF target.
+        # The harness does not send an Origin header. Reject browser-origin requests
+        # so another site cannot use this local service as a cross-site target.
         if request.headers.get("Origin") or request.headers.get("Sec-Fetch-Site") == "cross-site":
             return jsonify(error="Cross-site requests are not allowed."), 403
 
@@ -129,7 +117,7 @@ def create_app(data_dir):
         return None
 
     def injected_failure():
-        """Return an HTTP 503 response if this request should fail, otherwise None."""
+        """Apply the configured HTTP 503 fault, or let the request continue."""
         fail_count = request.args.get("fail_count", 0, type=int)
         if fail_count <= 0:
             return None
@@ -153,7 +141,7 @@ def create_app(data_dir):
         return None
 
     def injected_delay():
-        """Sleep for the requested delay (capped) and return how long we slept."""
+        """Wait for the requested, bounded delay and return the actual wait."""
         delay = request.args.get("delay", 0.0, type=float)
         delay = min(max(delay, 0.0), MAX_DELAY_SECONDS)
         if delay > 0:
@@ -178,7 +166,7 @@ def create_app(data_dir):
     def upload():
         failure = injected_failure()
         if failure:
-            return failure  # a 503 happens BEFORE anything is saved
+            return failure  # A 503 here means this request never reaches the save step.
 
         file = request.files.get("file")
         upload_id = request.form.get("upload_id", "")
@@ -190,7 +178,7 @@ def create_app(data_dir):
         sha256 = hashlib.sha256(content).hexdigest()
         idempotent = request.args.get("idempotent", 0, type=int) == 1
 
-        # Step 1: save the upload (this really writes the file to disk).
+        # Save the file first. The delayed response below makes the result ambiguous.
         with lock:
             log = read_upload_log()
             already_saved = [r for r in log if r["upload_id"] == upload_id]
@@ -222,8 +210,7 @@ def create_app(data_dir):
                     stored_file.unlink(missing_ok=True)
                     raise
 
-        # Step 2: only now apply the delay. The file is ALREADY saved, but the
-        # client does not know that until this reply arrives.
+        # The client may time out during this wait even though the file is saved.
         delay = injected_delay()
         return jsonify(
             status="stored" if stored_now else "already_stored",
@@ -246,7 +233,7 @@ def create_app(data_dir):
 
 
 def start_in_background(data_dir, host="127.0.0.1", port=DEFAULT_PORT):
-    """Run the demo app in a background thread of the CURRENT program.
+    """Run the service in a background thread in this Python process.
 
     Used by the automated tests and by the online (Streamlit Cloud) version, where only one
     program can run. Requests to it are still real HTTP requests over 127.0.0.1.
@@ -260,12 +247,12 @@ def start_in_background(data_dir, host="127.0.0.1", port=DEFAULT_PORT):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="PhoneReality demo backend")
+    parser = argparse.ArgumentParser(description="Run the BudgetBench demo service")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()
 
     demo = create_app(Path(__file__).parent / "data")
-    print(f"PhoneReality demo app running at http://{args.host}:{args.port}")
+    print(f"BudgetBench demo service running at http://{args.host}:{args.port}")
     print("Leave this window open. Press Ctrl+C to stop.")
     demo.run(host=args.host, port=args.port, threaded=True, debug=False)

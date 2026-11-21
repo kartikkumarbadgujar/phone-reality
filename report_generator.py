@@ -1,11 +1,8 @@
-"""
-report_generator.py - turns the saved test records and findings into downloadable files.
+"""Prepare the saved runs and findings for download.
 
-  JSON     - everything (records, findings, assumptions), for tools and for re-checking.
-  CSV      - one row per test, opens in Excel / Google Sheets.
-  Findings - one row per finding (CSV) and a readable Markdown report.
-
-All functions return text. The dashboard hands that text to a download button.
+JSON keeps the complete record for another tool to inspect. CSV is handy for
+sorting runs in a spreadsheet. The findings export also has a readable
+Markdown version for sharing with a teammate.
 """
 
 import csv
@@ -35,7 +32,7 @@ FINDING_COLUMNS = [
 
 
 def result_row(record):
-    """Flatten one nested test record into a single CSV row."""
+    """Put the useful parts of one run into a single CSV row."""
     config = record["config"]
     error = record.get("error") or {}
     check = record["evidence"].get("server_check") or {}

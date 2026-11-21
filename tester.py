@@ -1,19 +1,14 @@
-"""
-tester.py - runs REAL HTTP tests against the demo app and builds a test record.
+"""Run HTTP scenarios against the local demo service and save what happened.
 
-One test = one operation (load data or upload a file) under one condition profile.
-The profile only fills in default settings (timeout, delay, ...). The settings that
-were actually used are saved in the record's "config", so a test can be repeated exactly.
+Each run combines an operation, such as loading data or uploading a file, with
+a condition profile. We save the settings used so the same run can be repeated.
 
-Each record keeps two different answers apart:
-  operation_status - what the app experienced: SUCCESS, TIMEOUT, HTTP_ERROR, LOST_SIMULATED
-  verdict          - did PhoneReality reproduce the condition it predicted?
-                     PASS / FAIL / INCONCLUSIVE / ERROR
-So "operation_status = TIMEOUT, verdict = PASS" means: we caused a timeout on purpose
-and the tester observed exactly that.
+The record keeps the app's result separate from the test verdict. A timeout
+can be the expected result of a deliberately slow scenario, so the operation
+may fail while the test itself passes.
 
-You can also run a test from the terminal (handy for reproducing a finding):
-    python tester.py --operation upload --profile slow_network
+For example, run an upload test from the project folder with:
+``python tester.py --operation upload --profile slow_network``
 """
 
 import argparse
@@ -34,14 +29,14 @@ import storage
 
 DEFAULT_BASE_URL = "http://127.0.0.1:5050"
 
-# Operation statuses (what the client experienced)
+# These statuses describe what happened from the client's point of view.
 SUCCESS = "SUCCESS"
 TIMEOUT = "TIMEOUT"
 HTTP_ERROR = "HTTP_ERROR"
 CONNECTION_ERROR = "CONNECTION_ERROR"
 LOST_SIMULATED = "LOST_SIMULATED"
 
-# Evidence categories
+# Keep measurements, controlled faults and simulations distinct.
 GENUINE = "GENUINE"
 FAULT_INJECTION = "FAULT_INJECTION"
 SIMULATED = "SIMULATED"
@@ -101,27 +96,27 @@ PROFILES = {
         "description": "A repeatable software simulation decides whether each attempt is dropped. Any attempt that gets through is a real HTTP request.",
         "what_happens": "The seed makes the simulated drops repeatable for the same settings.",
         "evidence_category": SIMULATED,
-        # seed 4 gives random numbers 0.236 and 0.103, both below 0.5, so both attempts are dropped
+        # This seed drops both attempts at the default 0.5 loss rate.
         "defaults": {"timeout": 3.0, "server_delay": 0.0, "fail_count": 0, "retries": 1, "loss_rate": 0.5,
                      "seed": 4},
         "expected_behaviour": "The outcome depends on the seed. The default seed drops both attempts; try another seed to compare.",
     },
 }
 
-# Shown in the condition matrix only. There are deliberately no buttons for these.
+# Listed as future work because this version cannot run these tests yet.
 FUTURE_PROFILES = {
     "Process Interruption": "We need an Android app or emulator to stop a process and check whether its state survives.",
     "Resource Pressure (memory / storage)": "These readings need to come from an Android device or emulator, not the laptop running this app.",
     "Thermal / Battery Restrictions": "We need a phone or emulator to measure how battery and thermal limits affect an app.",
 }
 
-DEFAULT_SEED = 42  # used for the upload file content (and loss, unless a profile sets its own seed)
+DEFAULT_SEED = 42  # Keeps generated upload contents repeatable.
 
 
-# ---------------------------------------------------------------- configuration
+# Configuration
 
 def build_config(operation, profile, base_url=DEFAULT_BASE_URL, **overrides):
-    """Start from the profile's defaults, then apply any settings the user changed."""
+    """Combine a profile's starting values with the settings the user changed."""
     if profile not in PROFILES:
         raise ValueError(f"Unknown profile '{profile}'. Choose from: {', '.join(PROFILES)}")
     config = {"operation": operation, "profile": profile, "base_url": base_url,
@@ -133,7 +128,7 @@ def build_config(operation, profile, base_url=DEFAULT_BASE_URL, **overrides):
 
 
 def validate_config(config):
-    """Raise ValueError with a clear message if a setting is missing or out of range."""
+    """Check that the configuration is complete and its values are in range."""
     required = ["operation", "profile", "base_url", "timeout", "server_delay", "fail_count",
                 "retries", "loss_rate", "seed", "upload_size_kb", "idempotent_server"]
     missing = [key for key in required if key not in config]
@@ -151,7 +146,7 @@ def validate_config(config):
         parsed = urlsplit(base_url)
         host = parsed.hostname or ""
         local_host = host.lower() == "localhost" or ipaddress.ip_address(host).is_loopback
-        _ = parsed.port  # Validate malformed ports before any network request.
+        _ = parsed.port  # Accessing this also catches malformed port numbers.
     except ValueError:
         local_host = False
     if (parsed is None or parsed.scheme != "http" or not local_host or parsed.username or parsed.password
@@ -178,7 +173,7 @@ def validate_config(config):
 
 
 def evidence_category(config):
-    """Decide the evidence category from the settings actually used, not from the profile name."""
+    """Label a run from its actual settings, not just the selected profile."""
     if config["loss_rate"] > 0:
         return SIMULATED
     if config["server_delay"] > 0 or config["fail_count"] > 0:
@@ -187,7 +182,7 @@ def evidence_category(config):
 
 
 def simulated_drops(config):
-    """For each attempt, True if the packet-loss SIMULATION drops it. Same seed -> same answer."""
+    """Return which attempts the seeded packet-loss simulation drops."""
     attempts = config["retries"] + 1
     if config["loss_rate"] <= 0:
         return [False] * attempts
@@ -196,14 +191,14 @@ def simulated_drops(config):
 
 
 def _http_client():
-    """Use a fresh session without environment proxies for loopback-only requests."""
+    """Make local requests directly, without forwarding them through an environment proxy."""
     client = requests.Session()
     client.trust_env = False
     return client
 
 
 def _read_limited_response(response, limit):
-    """Read only a small response excerpt so a local wrong-target cannot exhaust memory."""
+    """Keep a short response excerpt instead of loading an unlimited response body."""
     chunks = []
     total = 0
     for chunk in response.iter_content(chunk_size=1024):
@@ -218,7 +213,7 @@ def _read_limited_response(response, limit):
 
 
 def predict_status(config):
-    """Work out, from the settings alone, what the operation status SHOULD be.
+    """Predict the operation result from the chosen settings.
 
     Returns (status, reason). The status is "UNPREDICTABLE" when the delay and the
     timeout are so close that normal timing noise could decide the result.
@@ -248,10 +243,10 @@ def predict_status(config):
     return last, "; ".join(reasons)
 
 
-# ---------------------------------------------------------------- running a test
+# Running a test
 
 def check_server(base_url, timeout=3.0):
-    """Return (True, message) if the demo app answers /api/health, else (False, help text)."""
+    """Check that the local service is BudgetBench's demo app and return a useful message."""
     try:
         with _http_client() as client:
             with client.get(base_url.rstrip("/") + "/api/health", timeout=timeout,
@@ -276,12 +271,12 @@ def check_server(base_url, timeout=3.0):
 
 
 def make_payload(config):
-    """Deterministic file content: the same seed and size always give the same bytes and hash."""
+    """Make repeatable file contents for tests that use the same seed and size."""
     return random.Random(config["seed"]).randbytes(config["upload_size_kb"] * 1024)
 
 
 def send_request(config, fault_key, upload_id, payload, attempt_number):
-    """Send ONE real HTTP request and describe what happened."""
+    """Send one request and record the reply or connection problem."""
     operation = OPERATIONS[config["operation"]]
     url = config["base_url"].rstrip("/") + operation["path"]
     params = {"delay": config["server_delay"], "fail_count": config["fail_count"], "fault_key": fault_key}
@@ -308,13 +303,12 @@ def send_request(config, fault_key, upload_id, payload, attempt_number):
                     attempt["response_excerpt"] = _read_limited_response(response, 4096).decode("utf-8", "replace")
         attempt["status"] = SUCCESS if 200 <= attempt["http_status"] < 300 else HTTP_ERROR
     except requests.exceptions.ReadTimeout as error:
-        # Connected, request sent, but no reply in time: the timeout we are testing for.
+        # The request reached the service, but its reply missed the deadline.
         attempt["status"] = TIMEOUT
         attempt["error_type"] = type(error).__name__
         attempt["error_message"] = str(error)[:300]
     except requests.exceptions.ConnectionError as error:
-        # Includes ConnectTimeout: we never reached the server (on Windows a stopped
-        # server often shows up as a ~2 s connect timeout). A setup problem, not a finding.
+        # A connection timeout means we did not get a response from the service at all.
         attempt["status"] = CONNECTION_ERROR
         attempt["error_type"] = type(error).__name__
         attempt["error_message"] = str(error)[:300]
@@ -327,7 +321,7 @@ def send_request(config, fault_key, upload_id, payload, attempt_number):
 
 
 def check_upload_on_server(base_url, upload_id):
-    """Ask the server what it REALLY saved for this upload_id (independent of the client's view)."""
+    """Check the server's receipts independently of what the client reported."""
     try:
         with _http_client() as client:
             with client.get(f"{base_url.rstrip('/')}/api/uploads/{upload_id}", timeout=5,
@@ -346,12 +340,12 @@ def check_upload_on_server(base_url, upload_id):
 
 
 def describe_outcome(record):
-    """One readable sentence about what actually happened."""
+    """Summarize the run in a sentence for the results page."""
     last = record["attempts"][-1]
     status = record["operation_status"]
     tries = len(record["attempts"])
     if status == SUCCESS:
-        text = f"Completed with HTTP {last['http_status']} in {last['elapsed_s']:.2f} s"
+        text = f"Request succeeded with HTTP {last['http_status']} in {last['elapsed_s']:.2f} s"
         text += f" on attempt {tries}." if tries > 1 else "."
     elif status == TIMEOUT:
         text = (f"Client gave up after {last['elapsed_s']:.2f} s ({last['error_type']}): "
@@ -359,23 +353,24 @@ def describe_outcome(record):
     elif status == HTTP_ERROR:
         text = f"Server replied HTTP {last['http_status']}."
     elif status == LOST_SIMULATED:
-        text = "The last attempt was dropped by the packet-loss SIMULATION and never reached the server."
+        text = "The packet-loss simulation dropped the last attempt before it reached the server."
     else:
         text = f"Could not connect to the demo app: {last['error_type']}."
     if tries > 1 and status != SUCCESS:
         text += f" All {tries} attempts failed."
     check = record["evidence"].get("server_check")
     if check and check.get("checked"):
-        text += f" Server check: {check['receipt_count']} saved copy(ies) of this upload."
+        receipt_count = check["receipt_count"]
+        noun = "copy" if receipt_count == 1 else "copies"
+        text += f" The server has {receipt_count} saved {noun} of this upload."
     return text
 
 
 def run_test(config, save=True):
-    """Run one complete test and return its record.
+    """Run the configured scenario and build its saved record.
 
-    The record is appended to data/results.json when save=True. A test that could not
-    reach the demo app at all (verdict ERROR) is NOT saved: that is a setup problem,
-    not a finding about the app.
+    When ``save`` is true, the record is appended to ``data/results.json``. If the
+    service cannot be reached, we return a setup error without saving a finding.
     """
     config = dict(config)
     validate_config(config)
@@ -455,10 +450,10 @@ def run_test(config, save=True):
     return record
 
 
-# ---------------------------------------------------------------- command line
+# Command-line entry point
 
 def make_parser():
-    parser = argparse.ArgumentParser(description="Run one PhoneReality test from the terminal.")
+    parser = argparse.ArgumentParser(description="Run a BudgetBench test from the terminal.")
     parser.add_argument("--operation", choices=list(OPERATIONS), required=True)
     parser.add_argument("--profile", choices=list(PROFILES), required=True)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)

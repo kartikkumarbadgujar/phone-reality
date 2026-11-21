@@ -1,4 +1,4 @@
-"""Security and regression checks for the local-only HTTP harness."""
+"""Guardrails for local requests, upload handling and saved run data."""
 
 import io
 from concurrent.futures import ThreadPoolExecutor

@@ -1,4 +1,4 @@
-"""Safe, read-only Android Debug Bridge helpers used by Device Lab."""
+"""Read device details with short, read-only ADB commands."""
 from __future__ import annotations
 
 import re
@@ -16,7 +16,7 @@ def adb_path():
 
 
 def run_adb(args, serial=None, timeout=8):
-    """Run a fixed ADB argument list. No shell is involved and calls are bounded."""
+    """Run one ADB command without a shell and stop if it takes too long."""
     executable = adb_path()
     if not executable:
         raise ADBError("ADB was not found. Install Android Platform Tools and add adb to PATH.")
@@ -85,7 +85,7 @@ def _kb_metric(text, pattern):
 
 
 def collect_snapshot(serial):
-    """Collect available values; unsupported readings stay unavailable rather than guessed."""
+    """Collect the readings this phone exposes; leave unsupported values empty."""
     collected = datetime.now(timezone.utc).isoformat(timespec="seconds")
     details = {
         "collected_at": collected,

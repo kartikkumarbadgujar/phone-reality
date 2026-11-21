@@ -1,4 +1,4 @@
-"""Dashboard tests using Streamlit's built-in AppTest (runs app.py without a browser)."""
+"""Exercise the Streamlit pages with AppTest, without opening a browser."""
 
 import pytest
 from streamlit.testing.v1 import AppTest
@@ -21,9 +21,9 @@ def open_page(page, base_url="http://127.0.0.1:9"):
 
 
 @pytest.mark.parametrize("page", PAGES)
-def test_every_page_works_with_no_results(page):  # T12
+def test_every_page_works_with_no_results(page):
     at = open_page(page)
-    assert storage.load_results() == ([], None)  # nothing fabricated
+    assert storage.load_results() == ([], None)  # The empty state must not invent sample runs.
 
 
 def test_empty_dashboard_says_so():
@@ -48,7 +48,7 @@ def test_run_button_executes_real_test_and_fills_pages(demo_server):
     at.button[0].click()
     at.run()
     assert not at.exception, at.exception
-    assert any("Client reported failure but the server saved the upload" in w.value for w in at.warning)
+    assert any("The upload succeeded, but the client showed an error" in w.value for w in at.warning)
 
     records, _ = storage.load_results()
     assert len(records) == 1 and records[0]["operation_status"] == "TIMEOUT"
@@ -62,9 +62,9 @@ def test_run_button_executes_real_test_and_fills_pages(demo_server):
 
 
 def test_online_mode_runs_builtin_demo_app_with_locked_address(monkeypatch):
-    """Simulates Streamlit Cloud: no separate demo_app.py, and visitors cannot change the address."""
+    """Check hosted mode starts its own service and keeps the target address fixed."""
     monkeypatch.setenv("PHONEREALITY_CLOUD", "1")
-    monkeypatch.setenv("PHONEREALITY_BUILTIN_PORT", "0")  # any free port, so it never clashes in tests
+    monkeypatch.setenv("PHONEREALITY_BUILTIN_PORT", "0")  # Let the OS choose an unused port.
     at = AppTest.from_file(APP, default_timeout=60)
     at.run()
     assert not at.exception, at.exception

@@ -1,4 +1,4 @@
-"""Coverage for the BudgetBench additions, using temporary SQLite state and mocked ADB output."""
+"""Check project storage and ADB parsing with isolated data and sample device output."""
 
 import json
 

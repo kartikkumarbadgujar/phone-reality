@@ -1,7 +1,7 @@
-"""Small SQLite persistence layer for BudgetBench projects and device evidence.
+"""SQLite helpers for projects, device snapshots and run history.
 
-The original PhoneReality JSON run format remains intact for backward compatibility.
-This database stores the new product entities and an index of completed runs.
+Older test records still live in JSON. SQLite keeps the newer workspace data
+and an index of those runs so the interface can search and summarize them.
 """
 from __future__ import annotations
 
